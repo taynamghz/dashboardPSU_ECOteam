@@ -408,7 +408,7 @@ class RacingTelemetryDashboard {
       buttonElement.disabled = true;
       buttonElement.textContent = 'Loading...';
       
-      const csvPath = '/Users/taynamghz./Documents/JM_dashboard/2025/attempt2/705 2025-02-11 07_07_51.csv';
+      const csvPath = 'race_data.csv';
       console.log('Loading real CSV data from:', csvPath);
       
       const response = await fetch(csvPath);
@@ -519,7 +519,7 @@ class RacingTelemetryDashboard {
 
   async loadCSVData() {
     try {
-      const csvPath = '/Users/taynamghz./Documents/JM_dashboard/2025/attempt2/705 2025-02-11 07_07_51.csv';
+      const csvPath = 'race_data.csv';
       console.log('Attempting to load CSV from:', csvPath);
       
       const response = await fetch(csvPath);
