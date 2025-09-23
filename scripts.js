@@ -408,11 +408,14 @@ class RacingTelemetryDashboard {
       buttonElement.disabled = true;
       buttonElement.textContent = 'Loading...';
       
-      const csvPath = 'simple_test.csv';
+      const csvPath = '/dashboardPSU_ECOteam/simple_test.csv';
       console.log('Loading real CSV data from:', csvPath);
+      console.log('Current URL:', window.location.href);
+      console.log('Base URL:', window.location.origin);
       
       const response = await fetch(csvPath);
       console.log('Response status:', response.status);
+      console.log('Response URL:', response.url);
       
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
@@ -519,7 +522,7 @@ class RacingTelemetryDashboard {
 
   async loadCSVData() {
     try {
-      const csvPath = 'simple_test.csv';
+      const csvPath = '/dashboardPSU_ECOteam/simple_test.csv';
       console.log('Attempting to load CSV from:', csvPath);
       
       const response = await fetch(csvPath);
