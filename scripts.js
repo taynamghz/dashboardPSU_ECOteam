@@ -408,7 +408,7 @@ class RacingTelemetryDashboard {
       buttonElement.disabled = true;
       buttonElement.textContent = 'Loading...';
       
-      const csvPath = './telemetry_data.csv';
+      const csvPath = './simple_test.csv';
       console.log('Loading real CSV data from:', csvPath);
       
       const response = await fetch(csvPath);
@@ -519,7 +519,7 @@ class RacingTelemetryDashboard {
 
   async loadCSVData() {
     try {
-      const csvPath = './telemetry_data.csv';
+      const csvPath = './simple_test.csv';
       console.log('Attempting to load CSV from:', csvPath);
       
       const response = await fetch(csvPath);
