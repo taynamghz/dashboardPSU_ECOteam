@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>JM Racing Dashboard</title>
     <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <script src="https://unpkg.com/mqtt@5.0.0/dist/mqtt.min.js"></script>
 </head>
 <body>
     <div class="dashboard-container">
@@ -20,6 +22,7 @@
                     <span class="lap-text">LAP</span>
                     <span class="lap-number" id="lapCounter">0/4</span>
                 </div>
+                <button id="testMqttBtn" class="test-btn">Test MQTT</button>
             </div>
         </header>
 
@@ -43,14 +46,15 @@
         </div>
 
         <div class="dashboard-layout">
-            <!-- Left Side - Telemetry Cards -->
+            <!-- Left Side - Combined Telemetry Card -->
             <div class="telemetry-section">
-                <!-- Race Telemetry Card -->
-                <div class="telemetry-card">
+                <!-- Combined Race Telemetry & Electrical Card -->
+                <div class="telemetry-card combined-card">
                     <div class="card-header">
-                        <h3>Race Telemetry</h3>
+                        <h3>Race Telemetry & Electrical</h3>
                     </div>
                     <div class="card-content">
+                        <!-- Row 1: Avg Speed, Remaining Time, Distance -->
                         <div class="metric-row">
                             <div class="metric-item">
                                 <div class="metric-value" id="avgSpeed">0</div>
@@ -62,29 +66,19 @@
                                 <div class="metric-unit">min</div>
                                 <div class="metric-label">Remaining</div>
                             </div>
-                        </div>
-                        <div class="metric-row">
                             <div class="metric-item">
                                 <div class="metric-value" id="distanceCovered">0</div>
                                 <div class="metric-unit">km</div>
                                 <div class="metric-label">Distance</div>
                             </div>
+                        </div>
+                        <!-- Row 2: Consumption, Voltage, Current -->
+                        <div class="metric-row">
                             <div class="metric-item">
                                 <div class="metric-value" id="consumption">0</div>
                                 <div class="metric-unit">Wh/km</div>
                                 <div class="metric-label">Consumption</div>
                             </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Electrical System Card -->
-                <div class="telemetry-card">
-                    <div class="card-header">
-                        <h3>Electrical</h3>
-                    </div>
-                    <div class="card-content">
-                        <div class="metric-row">
                             <div class="metric-item">
                                 <div class="metric-value" id="voltage">0</div>
                                 <div class="metric-unit">V</div>
@@ -96,6 +90,7 @@
                                 <div class="metric-label">Current</div>
                             </div>
                         </div>
+                        <!-- Row 3: Power, Total Energy, Efficiency -->
                         <div class="metric-row">
                             <div class="metric-item">
                                 <div class="metric-value" id="power">0</div>
@@ -107,23 +102,23 @@
                                 <div class="metric-unit">Wh</div>
                                 <div class="metric-label">Total Energy</div>
                             </div>
-                        </div>
-                        <div class="metric-row">
                             <div class="metric-item">
-                                <div class="barometer-container">
-                                    <div class="barometer-label">Throttle</div>
-                                    <div class="barometer-bar">
-                                        <div class="barometer-fill" id="throttleBarometer"></div>
-                                    </div>
-                                </div>
+                                <div class="metric-value" id="efficiency">0</div>
+                                <div class="metric-unit">km/kWh</div>
+                                <div class="metric-label">Efficiency</div>
+                            </div>
+                        </div>
+                        <!-- Row 3: GPS Coordinates (2-column layout) -->
+                        <div class="metric-row gps-row">
+                            <div class="metric-item">
+                                <div class="metric-value" id="gpsLongitude">0.000000</div>
+                                <div class="metric-unit">°</div>
+                                <div class="metric-label">GPS Longitude</div>
                             </div>
                             <div class="metric-item">
-                                <div class="barometer-container">
-                                    <div class="barometer-label">Brake</div>
-                                    <div class="barometer-bar">
-                                        <div class="barometer-fill" id="brakeBarometer"></div>
-                                    </div>
-                                </div>
+                                <div class="metric-value" id="gpsLatitude">0.000000</div>
+                                <div class="metric-unit">°</div>
+                                <div class="metric-label">GPS Latitude</div>
                             </div>
                         </div>
                     </div>
@@ -140,12 +135,64 @@
                         <div class="track-overlay" id="trackOverlay">
                             <div class="overlay-content">
                                 <h3>Race Track Visualization</h3>
-                                <p>Load telemetry data to start the race</p>
-                                <button id="loadDataBtn" class="overlay-btn primary">Load Real Data</button>
-                                <button id="playPauseBtn" class="overlay-btn secondary" disabled>Start Race</button>
+                                <p>Loading track shape...</p>
                             </div>
                         </div>
                     </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- F1-Style Telemetry Graphs -->
+        <div class="graphs-section">
+            <div class="graphs-header">
+                <h2>Telemetry Analysis</h2>
+                <div class="graph-controls">
+                    <button id="refreshGraphsBtn" class="graph-btn">Refresh Graphs</button>
+                    <select id="lapFilter" class="lap-selector">
+                        <option value="all">All Laps</option>
+                        <option value="0">Lap 1</option>
+                        <option value="1">Lap 2</option>
+                        <option value="2">Lap 3</option>
+                    </select>
+                </div>
+            </div>
+            
+            <div class="graphs-grid">
+                <!-- Current Heat Map -->
+                <div class="graph-container">
+                    <div class="graph-title">Current Heat Map</div>
+                    <div id="currentHeatMap" class="plotly-graph"></div>
+                </div>
+                
+                <!-- Net Energy Heat Map -->
+                <div class="graph-container">
+                    <div class="graph-title">Net Energy Heat Map</div>
+                    <div id="energyHeatMap" class="plotly-graph"></div>
+                </div>
+                
+                <!-- Speed vs Distance -->
+                <div class="graph-container">
+                    <div class="graph-title">Speed vs Distance</div>
+                    <div id="speedGraph" class="plotly-graph"></div>
+                </div>
+                
+                <!-- Current vs Distance -->
+                <div class="graph-container">
+                    <div class="graph-title">Current vs Distance</div>
+                    <div id="currentGraph" class="plotly-graph"></div>
+                </div>
+                
+                <!-- Power vs Distance -->
+                <div class="graph-container">
+                    <div class="graph-title">Power vs Distance</div>
+                    <div id="powerGraph" class="plotly-graph"></div>
+                </div>
+                
+                <!-- Acceleration vs Speed -->
+                <div class="graph-container">
+                    <div class="graph-title">Acceleration vs Speed</div>
+                    <div id="accelerationGraph" class="plotly-graph"></div>
                 </div>
             </div>
         </div>

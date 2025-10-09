@@ -19,7 +19,6 @@ class TrackVisualizer2D {
     
     this.canvas = document.getElementById('trackCanvas');
     if (!this.canvas) {
-      console.log(' Track canvas not found');
       return;
     }
     
@@ -28,7 +27,6 @@ class TrackVisualizer2D {
     window.addEventListener('resize', () => this.resizeCanvas());
     
     this.isInitialized = true;
-    console.log(' 2D Track Visualizer initialized');
   }
 
   resizeCanvas() {
@@ -41,24 +39,18 @@ class TrackVisualizer2D {
   }
 
   setTrackData(gpsData) {
-    console.log(' Setting 2D track data from GPS points...');
-    
     // Extract GPS coordinates
     this.trackPoints = gpsData.map(point => ({
       lat: parseFloat(point.gps_latitude),
       lng: parseFloat(point.gps_longitude)
     })).filter(point => !isNaN(point.lat) && !isNaN(point.lng));
 
-    console.log(` Loaded ${this.trackPoints.length} GPS points`);
-
     if (this.trackPoints.length === 0) {
-      console.log(' No valid GPS points found');
       return;
     }
 
     // Extract the overall track shape (reduce points to get clean shape)
     const trackShape = this.extractTrackShape(this.trackPoints);
-    console.log(` Extracted track shape with ${trackShape.length} points`);
 
     // Calculate bounds
     this.bounds.minLat = Math.min(...trackShape.map(p => p.lat));
@@ -66,13 +58,9 @@ class TrackVisualizer2D {
     this.bounds.minLng = Math.min(...trackShape.map(p => p.lng));
     this.bounds.maxLng = Math.max(...trackShape.map(p => p.lng));
 
-    console.log('📍 Track bounds:', this.bounds);
-
     // Calculate scale and offset for optimal display
     this.calculateTransform();
     this.draw();
-    
-    console.log(' 2D track reference created');
   }
 
   extractTrackShape(points) {
@@ -98,21 +86,49 @@ class TrackVisualizer2D {
     const latRange = this.bounds.maxLat - this.bounds.minLat;
     const lngRange = this.bounds.maxLng - this.bounds.minLng;
     
-    // Scale to fit canvas with padding
-    const padding = 50;
+    console.log('📊 Track bounds:', {
+      minLat: this.bounds.minLat,
+      maxLat: this.bounds.maxLat,
+      minLng: this.bounds.minLng,
+      maxLng: this.bounds.maxLng,
+      latRange,
+      lngRange
+    });
+    
+    // Scale to fit canvas with generous padding (smaller track, better centered)
+    const padding = 80; // Increased padding for better centering
     const scaleX = (this.canvas.width - padding * 2) / lngRange;
     const scaleY = (this.canvas.height - padding * 2) / latRange;
     
-    this.scale = Math.min(scaleX, scaleY);
-    this.offsetX = padding - this.bounds.minLng * this.scale;
-    this.offsetY = padding - this.bounds.minLat * this.scale;
+    // Make track smaller by reducing scale
+    this.scale = Math.min(scaleX, scaleY) * 0.7; // 70% of original size
+    
+    // Center the track better
+    const trackWidth = lngRange * this.scale;
+    const trackHeight = latRange * this.scale;
+    this.offsetX = (this.canvas.width - trackWidth) / 2 - this.bounds.minLng * this.scale;
+    this.offsetY = (this.canvas.height - trackHeight) / 2 - this.bounds.minLat * this.scale;
+    
+    console.log('🎯 Transform calculated:', {
+      scale: this.scale,
+      offsetX: this.offsetX,
+      offsetY: this.offsetY,
+      trackWidth,
+      trackHeight,
+      canvasSize: `${this.canvas.width}x${this.canvas.height}`
+    });
   }
 
   latLngToCanvas(lat, lng) {
-    return {
-      x: lng * this.scale + this.offsetX,
-      y: this.canvas.height - (lat * this.scale + this.offsetY) // Flip Y axis
-    };
+    const x = lng * this.scale + this.offsetX;
+    const y = this.canvas.height - (lat * this.scale + this.offsetY); // Flip Y axis
+    
+    // Debug first few points
+    if (Math.random() < 0.01) { // Log 1% of points to avoid spam
+      console.log(`📍 GPS: (${lat.toFixed(6)}, ${lng.toFixed(6)}) → Canvas: (${x.toFixed(1)}, ${y.toFixed(1)})`);
+    }
+    
+    return { x, y };
   }
 
   draw() {
@@ -137,11 +153,17 @@ class TrackVisualizer2D {
   }
 
   drawTrack() {
-    if (this.trackPoints.length < 2) return;
+    if (this.trackPoints.length < 2) {
+      console.log('❌ Not enough track points to draw:', this.trackPoints.length);
+      return;
+    }
 
-    // Draw thick white track reference
+    console.log('🎨 Drawing track with', this.trackPoints.length, 'points');
+    console.log('📏 Canvas size:', this.canvas.width, 'x', this.canvas.height);
+
+    // Draw bright white track
     this.ctx.strokeStyle = '#ffffff';
-    this.ctx.lineWidth = 20; // Very thick line
+    this.ctx.lineWidth = 3; // Thinner, cleaner line
     this.ctx.lineCap = 'round';
     this.ctx.lineJoin = 'round';
     
@@ -274,6 +296,16 @@ document.addEventListener('DOMContentLoaded', () => {
     window.trackVisualizer = new TrackVisualizer2D();
     window.trackVisualizer.initCanvas();
     console.log(' 2D Track Visualizer initialized');
+    
+    // Initialize F1-Style Graphs
+    console.log(' Initializing F1-Style Graphs...');
+    window.f1Graphs = new F1TelemetryGraphs();
+    console.log(' F1-Style Graphs initialized');
+    
+    // Initialize dashboard after track visualizer is ready
+    console.log('🚀 Initializing Racing Telemetry Dashboard...');
+    window.racingDashboard = new RacingTelemetryDashboard();
+    console.log('✅ Racing Telemetry Dashboard initialized');
   } else {
     console.error(' Track canvas not found!');
   }
@@ -283,14 +315,53 @@ document.addEventListener('DOMContentLoaded', () => {
 class RacingTelemetryDashboard {
   constructor() {
     this.startTime = Date.now();
-    this.csvData = [];
-    this.currentIndex = 0;
+    this.mqttClient = null;
+    this.isConnected = false;
     this.raceStartTime = null;
     
     // Race parameters
     this.targetRaceTime = 35 * 60; // 35 minutes in seconds
     this.totalRaceDistance = 14.8; // km
     this.totalLaps = 4;
+    
+    // MQTT Configuration - ShellJM Racing Team
+    this.mqttConfig = {
+      host: '8fac0c92ea0a49b8b56f39536ba2fd78.s1.eu.hivemq.cloud',
+      port: 8884, // WebSocket port for browser connections
+      username: 'ShellJM',
+      password: 'psuEcoteam1st',
+      topics: {
+        telemetry: 'car/telemetry'  // Single topic for all telemetry data
+      }
+    };
+    
+    // Current telemetry data from MQTT
+    this.currentTelemetry = {
+      speed: 0,
+      voltage: 0,
+      current: 0,
+      power: 0,
+      totalEnergy: 0,
+      efficiency: 0,
+      consumption: 0,
+      longitude: 0,
+      latitude: 0,
+      distance: 0,
+      lapDistance: 0,
+      lap: 0,
+      timestamp: 0
+    };
+    
+    // Data history for graphs
+    this.dataHistory = {
+      volts: [],
+      current: [],
+      efficiency: [],
+      consumption: []
+    };
+    
+    // Maximum data points to keep
+    this.maxDataPoints = 1000;
     
     // Data tracking
     this.speedHistory = [];
@@ -315,36 +386,288 @@ class RacingTelemetryDashboard {
   }
 
   async init() {
-    this.setupLoadDataButton();
-    this.setupPlayPauseButton();
+    console.log('🏁 Dashboard init() called');
     this.updateTelemetry(); // Show initial state
+    console.log('📊 Telemetry updated, now loading track...');
+    await this.loadTrackShape(); // Automatically load track on startup
+    this.setupTestButton(); // Setup MQTT test button
   }
   
-  setupLoadDataButton() {
-    const button = document.getElementById('loadDataBtn');
-    if (button) {
-      button.addEventListener('click', async () => {
-        console.log(' Load Data button clicked!');
-        await this.loadRealCSVData();
-      });
-      console.log(' Load Data button event listener added');
-    } else {
-      console.error(' Load Data button not found!');
+  
+  
+  async loadTrackShape() {
+    try {
+      console.log('🚀 Starting track shape loading...');
+      
+      // Update overlay to show loading state
+      const overlayText = document.querySelector('#trackOverlay .overlay-content p');
+      if (overlayText) {
+        overlayText.textContent = 'Loading track shape...';
+      }
+      
+      console.log('📡 Fetching race_data.csv...');
+      
+      const response = await fetch('race_data.csv');
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      console.log('✅ CSV file fetched successfully');
+      
+      const csvText = await response.text();
+      const lines = csvText.split('\n');
+      const headers = lines[0].split(',');
+      
+      console.log('📋 CSV headers:', headers.slice(0, 10)); // Show first 10 headers
+      
+      // Find GPS coordinate columns
+      const latIndex = headers.findIndex(h => h.trim() === 'gps_latitude');
+      const lngIndex = headers.findIndex(h => h.trim() === 'gps_longitude');
+      
+      console.log('📍 GPS column indices - lat:', latIndex, 'lng:', lngIndex);
+      
+      if (latIndex === -1 || lngIndex === -1) {
+        throw new Error('GPS coordinate columns not found in race_data.csv');
+      }
+      
+      // Extract GPS coordinates for track shape
+      const trackPoints = [];
+      console.log('🔍 Processing CSV lines...');
+      for (let i = 1; i < lines.length; i++) {
+        if (lines[i].trim()) {
+          const values = lines[i].split(',');
+          const lat = parseFloat(values[latIndex]);
+          const lng = parseFloat(values[lngIndex]);
+          
+          if (!isNaN(lat) && !isNaN(lng)) {
+            trackPoints.push({ gps_latitude: lat, gps_longitude: lng });
+          }
+        }
+        
+        // Log progress every 1000 lines
+        if (i % 1000 === 0) {
+          console.log(`📊 Processed ${i} lines, found ${trackPoints.length} valid GPS points`);
+        }
+      }
+      
+      console.log(`🎯 Loaded ${trackPoints.length} track points`);
+      
+      // Set track data for visualizer (without real-time pointer)
+      if (window.trackVisualizer) {
+        console.log('🎨 Setting track data for visualizer...');
+        console.log('📊 Track points to set:', trackPoints.length);
+        window.trackVisualizer.setTrackData(trackPoints);
+        console.log('✅ Track data set successfully');
+        
+        this.hideTrackOverlay();
+        console.log('🎉 Track shape loaded and displayed successfully');
+      } else {
+        console.error('❌ Track visualizer not initialized!');
+        console.error('❌ Available window objects:', Object.keys(window).filter(k => k.includes('track')));
+        throw new Error('Track visualizer not initialized');
+      }
+      
+    } catch (error) {
+      console.error('Error loading track shape:', error);
+      
+      // Update overlay to show error state
+      const overlayText = document.querySelector('#trackOverlay .overlay-content p');
+      if (overlayText) {
+        overlayText.textContent = 'Failed to load track shape';
+      }
+      
+      // Keep overlay visible on error so user can see the issue
     }
   }
-  
-  setupPlayPauseButton() {
-    const button = document.getElementById('playPauseBtn');
-    if (button) {
-      button.addEventListener('click', () => {
-        this.togglePlayPause();
+
+  async connectToMQTT() {
+    try {
+      console.log(' Connecting to MQTT broker...');
+      
+      // Show loading message
+      const button = document.getElementById('connectMqttBtn');
+      if (button) {
+        button.textContent = 'Connecting...';
+        button.disabled = true;
+      }
+      
+      // MQTT connection options - use HiveMQ Cloud format
+      const wsUrl = `wss://${this.mqttConfig.host}:${this.mqttConfig.port}/mqtt`;
+      console.log('🔗 WebSocket URL:', wsUrl);
+      
+      const options = {
+        username: this.mqttConfig.username,
+        password: this.mqttConfig.password,
+        clientId: 'jm_racing_dashboard_' + Math.random().toString(16).substr(2, 8),
+        clean: true,
+        reconnectPeriod: 1000,
+        connectTimeout: 30 * 1000,
+        // SSL options for HiveMQ Cloud
+        rejectUnauthorized: false
+      };
+      
+      // Connect to MQTT broker using the direct URL format
+      this.mqttClient = mqtt.connect(wsUrl, options);
+      
+      // Connection timeout
+      const connectionTimeout = setTimeout(() => {
+        if (!this.isConnected) {
+          this.mqttClient.end();
+          alert('❌ MQTT Connection Timeout!\nPlease check your internet connection and broker details.');
+          
+          // Reset button state
+          if (button) {
+            button.textContent = 'Connect to MQTT';
+            button.disabled = false;
+            button.style.background = '';
+          }
+        }
+      }, 10000); // 10 second timeout
+      
+      this.mqttClient.on('connect', () => {
+        console.log(' Connected to MQTT broker');
+        this.isConnected = true;
+        clearTimeout(connectionTimeout);
+        
+        // Subscribe to telemetry topic
+        this.mqttClient.subscribe(this.mqttConfig.topics.telemetry, (err) => {
+          if (!err) {
+            console.log(' Subscribed to telemetry topic:', this.mqttConfig.topics.telemetry);
+            
+            // Success message
+            alert('✅ MQTT Connected Successfully!\n\n📡 Connected to: ' + this.mqttConfig.host + '\n📋 Topic: ' + this.mqttConfig.topics.telemetry + '\n\nWaiting for telemetry data...');
+            
+            // Update button state
+            if (button) {
+              button.textContent = 'Connected ✓';
+              button.style.background = 'linear-gradient(135deg, #00ff00, #00cc00)';
+            }
+          } else {
+            alert('❌ Failed to subscribe to telemetry topic: ' + err.message);
+          }
+        });
       });
-      console.log(' Play/Pause button event listener added');
-    } else {
-      console.error(' Play/Pause button not found!');
+      
+      this.mqttClient.on('message', (topic, message) => {
+        this.handleMqttMessage(topic, message.toString());
+      });
+      
+      this.mqttClient.on('error', (err) => {
+        console.error('MQTT connection error:', err);
+        this.isConnected = false;
+        clearTimeout(connectionTimeout);
+        
+        // Error message
+        alert('❌ MQTT Connection Failed!\n\nError: ' + err.message + '\n\nPlease check:\n• Internet connection\n• Broker credentials\n• Firewall settings');
+        
+        // Reset button state
+        if (button) {
+          button.textContent = 'Connect to MQTT';
+          button.disabled = false;
+          button.style.background = '';
+        }
+      });
+      
+      this.mqttClient.on('close', () => {
+        console.log(' MQTT connection closed');
+        this.isConnected = false;
+        clearTimeout(connectionTimeout);
+        
+        // Reset button state if not manually disconnected
+        if (button && button.textContent !== 'Connect to MQTT') {
+          button.textContent = 'Connect to MQTT';
+          button.disabled = false;
+          button.style.background = '';
+        }
+      });
+      
+    } catch (error) {
+      console.error('Error connecting to MQTT:', error);
+      alert('❌ Failed to connect to MQTT: ' + error.message);
+      
+      // Reset button state
+      const button = document.getElementById('connectMqttBtn');
+      if (button) {
+        button.textContent = 'Connect to MQTT';
+        button.disabled = false;
+        button.style.background = '';
+      }
     }
   }
-  
+
+  handleMqttMessage(topic, message) {
+    try {
+      if (topic !== this.mqttConfig.topics.telemetry) {
+        return; // Ignore other topics
+      }
+      
+      const data = JSON.parse(message);
+      console.log('Received telemetry data:', data);
+      
+      // Parse voltage data
+      if (data.voltage) {
+        this.currentTelemetry.voltage = parseFloat(data.voltage) || 0;
+      }
+      
+      // Parse current data
+      if (data.current) {
+        this.currentTelemetry.current = parseFloat(data.current) || 0;
+      }
+      
+      // Parse power data
+      if (data.power) {
+        this.currentTelemetry.power = parseFloat(data.power) || 0;
+      } else {
+        // Calculate power if not provided
+        this.currentTelemetry.power = this.currentTelemetry.voltage * this.currentTelemetry.current;
+      }
+      
+      // Parse RPM data (not used in dashboard but available)
+      if (data.rpm) {
+        this.currentTelemetry.rpm = parseFloat(data.rpm) || 0;
+      }
+      
+      // Parse speed data
+      if (data.speed) {
+        this.currentTelemetry.speed = parseFloat(data.speed) || 0;
+      }
+      
+      // Parse GPS data (format: "latitude, longitude")
+      if (data.gps) {
+        const gpsParts = data.gps.split(',');
+        if (gpsParts.length >= 2) {
+          this.currentTelemetry.latitude = parseFloat(gpsParts[0].trim()) || 0;
+          this.currentTelemetry.longitude = parseFloat(gpsParts[1].trim()) || 0;
+        }
+      }
+      
+      // Set default values for missing data (will show as 0 or -)
+      this.currentTelemetry.totalEnergy = this.currentTelemetry.totalEnergy || 0;
+      this.currentTelemetry.consumption = this.currentTelemetry.consumption || 0;
+      this.currentTelemetry.efficiency = this.currentTelemetry.efficiency || 0;
+      this.currentTelemetry.distance = this.currentTelemetry.distance || 0;
+      
+      // Update dashboard with new data
+      this.updateTelemetryFromMqtt();
+      
+    } catch (error) {
+      console.error('Error parsing MQTT message:', error);
+    }
+  }
+
+  updateTelemetryFromMqtt() {
+    // Update all dashboard elements with current telemetry data
+    this.updateElement('avgSpeed', this.currentTelemetry.speed > 0 ? this.currentTelemetry.speed.toFixed(1) : '-');
+    this.updateElement('voltage', this.currentTelemetry.voltage > 0 ? this.currentTelemetry.voltage.toFixed(1) : '-');
+    this.updateElement('current', this.currentTelemetry.current > 0 ? this.currentTelemetry.current.toFixed(1) : '-');
+    this.updateElement('power', this.currentTelemetry.power > 0 ? this.currentTelemetry.power.toFixed(0) : '-');
+    this.updateElement('totalEnergy', this.currentTelemetry.totalEnergy > 0 ? this.currentTelemetry.totalEnergy.toFixed(0) : '-');
+    this.updateElement('consumption', this.currentTelemetry.consumption > 0 ? this.currentTelemetry.consumption.toFixed(0) : '-');
+    this.updateElement('efficiency', this.currentTelemetry.efficiency > 0 ? this.currentTelemetry.efficiency.toFixed(1) : '-');
+    this.updateElement('gpsLongitude', this.currentTelemetry.longitude !== 0 ? this.currentTelemetry.longitude.toFixed(6) : '-');
+    this.updateElement('gpsLatitude', this.currentTelemetry.latitude !== 0 ? this.currentTelemetry.latitude.toFixed(6) : '-');
+  }
+
   hideTrackOverlay() {
     const overlay = document.getElementById('trackOverlay');
     if (overlay) {
@@ -357,6 +680,145 @@ class RacingTelemetryDashboard {
     if (overlay) {
       overlay.classList.remove('hidden');
     }
+  }
+
+  setupTestButton() {
+    console.log('🔧 Setting up test button...');
+    const testBtn = document.getElementById('testMqttBtn');
+    console.log('🔍 Test button found:', testBtn);
+    
+    if (testBtn) {
+      console.log('✅ Adding click listener to test button');
+      testBtn.addEventListener('click', () => {
+        console.log('🧪 Testing MQTT connection...');
+        this.testMqttConnection();
+      });
+      console.log('✅ Test button setup complete');
+    } else {
+      console.error('❌ Test button not found!');
+    }
+  }
+
+  // Simple MQTT test function (can be called from console)
+  async simpleMqttTest() {
+    console.log('🧪 Simple MQTT Test Starting...');
+    
+    try {
+      // Test MQTT connection with minimal setup
+      const mqtt = window.mqtt;
+      if (!mqtt) {
+        throw new Error('MQTT library not loaded');
+      }
+      
+      console.log('📡 Connecting to:', this.mqttConfig.host, ':', this.mqttConfig.port);
+      
+      const options = {
+        host: this.mqttConfig.host,
+        port: this.mqttConfig.port,
+        protocol: 'wss',
+        clientId: 'test_' + Math.random().toString(16).substr(2, 8),
+        clean: true,
+        connectTimeout: 10000,
+        username: this.mqttConfig.username,
+        password: this.mqttConfig.password,
+      };
+      
+      console.log('🔌 Connection options:', options);
+      
+      const client = mqtt.connect(options);
+      
+      return new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          client.end();
+          reject(new Error('Connection timeout'));
+        }, 15000);
+        
+        client.on('connect', () => {
+          console.log('✅ MQTT Connected successfully!');
+          clearTimeout(timeout);
+          client.end();
+          resolve(true);
+        });
+        
+        client.on('error', (err) => {
+          console.error('❌ MQTT Connection error:', err);
+          clearTimeout(timeout);
+          client.end();
+          reject(err);
+        });
+      });
+      
+    } catch (error) {
+      console.error('❌ Simple MQTT test failed:', error);
+      throw error;
+    }
+  }
+
+  async testMqttConnection() {
+    try {
+      console.log('🔌 Testing MQTT connection...');
+      console.log('📡 Broker:', this.mqttConfig.host);
+      console.log('🔌 Port:', this.mqttConfig.port);
+      console.log('👤 Username:', this.mqttConfig.username);
+      console.log('📋 Topic:', this.mqttConfig.topics.telemetry);
+      
+      // Show connection attempt
+      this.showConnectionStatus('Connecting to MQTT broker...', 'info');
+      
+      // Test connection
+      await this.connectToMQTT();
+      
+      if (this.isConnected) {
+        this.showConnectionStatus('✅ MQTT Connected! Listening for data...', 'success');
+        console.log('✅ MQTT connection test successful');
+      } else {
+        this.showConnectionStatus('❌ MQTT connection failed', 'error');
+        console.log('❌ MQTT connection test failed');
+      }
+    } catch (error) {
+      console.error('❌ MQTT test error:', error);
+      this.showConnectionStatus(`❌ MQTT Error: ${error.message}`, 'error');
+    }
+  }
+
+  showConnectionStatus(message, type) {
+    // Create or update status popup
+    let statusDiv = document.getElementById('mqttStatus');
+    if (!statusDiv) {
+      statusDiv = document.createElement('div');
+      statusDiv.id = 'mqttStatus';
+      statusDiv.style.cssText = `
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        padding: 15px 20px;
+        border-radius: 8px;
+        color: white;
+        font-weight: 600;
+        z-index: 1000;
+        max-width: 300px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+      `;
+      document.body.appendChild(statusDiv);
+    }
+    
+    // Set style based on type
+    if (type === 'success') {
+      statusDiv.style.background = 'linear-gradient(135deg, #00ff00, #00cc00)';
+    } else if (type === 'error') {
+      statusDiv.style.background = 'linear-gradient(135deg, #ff0000, #cc0000)';
+    } else {
+      statusDiv.style.background = 'linear-gradient(135deg, #0066ff, #0044cc)';
+    }
+    
+    statusDiv.textContent = message;
+    
+    // Auto-hide after 5 seconds
+    setTimeout(() => {
+      if (statusDiv && statusDiv.parentNode) {
+        statusDiv.parentNode.removeChild(statusDiv);
+      }
+    }, 5000);
   }
   
   togglePlayPause() {
@@ -487,8 +949,18 @@ class RacingTelemetryDashboard {
         window.trackVisualizer.setTrackData(this.csvData);
         console.log(' Track visualizer initialized with', this.csvData.length, 'data points');
       } else {
-        console.error(' Track visualizer not available!');
+        console.log(' Track visualizer not found');
       }
+      
+      // Initialize F1-Style Graphs with loaded data
+      if (window.f1Graphs) {
+        console.log(' Setting data for F1 graphs...');
+        window.f1Graphs.setData(this.csvData);
+        console.log(' F1 graphs initialized with', this.csvData.length, 'data points');
+      } else {
+        console.log(' F1 graphs not found');
+      }
+      
       
       // Reset to first data point
       this.currentIndex = 0;
@@ -517,64 +989,10 @@ class RacingTelemetryDashboard {
     }
   }
 
-  async loadCSVData() {
-    try {
-      const csvPath = 'race_data.csv';
-      console.log('Attempting to load CSV from:', csvPath);
-      
-      const response = await fetch(csvPath);
-      console.log('Response status:', response.status);
-      
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      
-      const csvText = await response.text();
-      console.log('CSV text length:', csvText.length);
-      
-      const lines = csvText.split('\n');
-      console.log('Number of lines:', lines.length);
-      
-      const headers = lines[0].split(',');
-      console.log('Headers:', headers);
-      
-      this.csvData = [];
-      for (let i = 1; i < lines.length; i++) {
-        if (lines[i].trim()) {
-          const values = lines[i].split(',');
-          const row = {};
-          headers.forEach((header, index) => {
-            row[header.trim()] = values[index] ? values[index].trim() : '';
-          });
-          this.csvData.push(row);
-        }
-      }
-      
-      console.log(` Loaded ${this.csvData.length} data points from CSV`);
-      if (this.csvData.length > 0) {
-        this.raceStartTime = parseFloat(this.csvData[0].obc_timestamp);
-        console.log(' Race start time:', this.raceStartTime);
-        console.log(' First data point:', this.csvData[0]);
-        console.log(' GPS coordinates:', {
-          lat: this.csvData[0].gps_latitude,
-          lon: this.csvData[0].gps_longitude
-        });
-        console.log('🚗 Speed:', this.csvData[0].gps_speed);
-        console.log('⚡ Voltage:', this.csvData[0].jm3_voltage);
-        console.log('🔋 Current:', this.csvData[0].jm3_current);
-      }
-    } catch (error) {
-      console.error('Error loading CSV data:', error);
-      console.log('Falling back to simulation mode');
-      // Fallback to simulation if CSV loading fails
-      this.csvData = [];
-    }
-  }
-
   updateTelemetry() {
-    if (this.csvData.length === 0) {
-      console.log(' No CSV data available, using simulated telemetry');
-      this.updateSimulatedTelemetry();
+    if (!this.csvData || this.csvData.length === 0) {
+      console.log(' No CSV data available, showing initial state');
+      this.updateInitialState();
       return;
     }
     
@@ -657,9 +1075,8 @@ class RacingTelemetryDashboard {
         this.updateElectricalSystem(volts, current, power, energyTotalWh, energyLap);
         this.updateEfficiencyMetrics(consumption, efficiency);
     
-    // Update throttle and brake barometers
-    const previousData = this.currentIndex > 0 ? this.csvData[this.currentIndex - 1] : null;
-    this.updateThrottleBrakeBarometers(currentData, previousData);
+    // Update GPS coordinates display
+    this.updateGPSDisplay(currentData.gps_latitude, currentData.gps_longitude);
     
     this.updateTimingStatus(raceTime, lapTime, remainingTime, remainingDistance);
     this.updateLocation(currentData.gps_latitude, currentData.gps_longitude);
@@ -667,6 +1084,30 @@ class RacingTelemetryDashboard {
 
     // Move to next data point
     this.currentIndex = (this.currentIndex + 1) % this.csvData.length;
+  }
+
+  updateInitialState() {
+    // Show initial state with zeros when no data is available
+    console.log('📊 Showing initial state with zeros');
+    
+    // Update all dashboard elements with zeros
+    this.updateElement('avgSpeed', '0');
+    this.updateElement('remainingTime', '35:00');
+    this.updateElement('distanceCovered', '0');
+    this.updateElement('consumption', '0');
+    this.updateElement('voltage', '0');
+    this.updateElement('current', '0');
+    this.updateElement('power', '0');
+    this.updateElement('totalEnergy', '0');
+    this.updateElement('efficiency', '0');
+    this.updateElement('gpsLongitude', '0.000000');
+    this.updateElement('gpsLatitude', '0.000000');
+    
+    // Update main dashboard
+    this.updateElement('mainSpeed', '0');
+    this.updateElement('mainEfficiency', '0');
+    this.updateElement('mainTimer', '00:00');
+    this.updateElement('lapCounter', '0/4');
   }
 
   updateSimulatedTelemetry() {
@@ -709,7 +1150,9 @@ class RacingTelemetryDashboard {
     }
     
     const efficiencyBar = document.getElementById('efficiencyBar');
-    efficiencyBar.style.width = efficiency + '%';
+    if (efficiencyBar) {
+      efficiencyBar.style.width = efficiency + '%';
+    }
   }
 
   storeDataForGraphs(volts, current, efficiency, consumption) {
@@ -1187,87 +1630,12 @@ class RacingTelemetryDashboard {
     }
   }
   
-  updateThrottleBrakeBarometers(currentData, previousData) {
-    // Calculate throttle and brake flags
-    const throttleFlag = this.calculateThrottleFlag(currentData, previousData);
-    const brakeFlag = this.calculateBrakeFlag(currentData, previousData);
+  updateGPSDisplay(latitude, longitude) {
+    // Update GPS longitude display as simple number
+    this.updateElement('gpsLongitude', parseFloat(longitude).toFixed(6));
     
-    // Update throttle barometer
-    this.updateThrottleBarometer(throttleFlag);
-    
-    // Update brake barometer
-    this.updateBrakeBarometer(brakeFlag);
-  }
-  
-  calculateThrottleFlag(currentData, previousData) {
-    if (!previousData) return false;
-    
-    const current = parseFloat(currentData.jm3_current) / 1000;
-    const speed = parseFloat(currentData.gps_speed);
-    const prevSpeed = parseFloat(previousData.gps_speed);
-    const speedDiff = speed - prevSpeed;
-    
-    // Throttle when current > threshold AND speed is increasing
-    const throttleThreshold = 10; // A
-    return (current > throttleThreshold) && (speedDiff > 0);
-  }
-  
-  calculateBrakeFlag(currentData, previousData) {
-    if (!previousData) return false;
-    
-    const current = parseFloat(currentData.jm3_current) / 1000;
-    const speed = parseFloat(currentData.gps_speed);
-    const prevSpeed = parseFloat(previousData.gps_speed);
-    const acceleration = (speed - prevSpeed) / 1; // Assuming 1 second intervals
-    
-    // Brake when acceleration < -0.5 AND current < 2A
-    return (acceleration < -0.5) && (current < 2);
-  }
-  
-  updateThrottleBarometer(throttleFlag) {
-    const barometer = document.getElementById('throttleBarometer');
-    
-    if (barometer) {
-      // Calculate throttle percentage based on recent throttle activity
-      this.throttleHistory = this.throttleHistory || [];
-      this.throttleHistory.push(throttleFlag ? 1 : 0);
-      
-      // Keep only last 10 readings
-      if (this.throttleHistory.length > 10) {
-        this.throttleHistory.shift();
-      }
-      
-      // Calculate average throttle activity
-      const throttlePercent = (this.throttleHistory.reduce((a, b) => a + b, 0) / this.throttleHistory.length) * 100;
-      
-      barometer.style.width = `${throttlePercent}%`;
-      
-      // Add throttle class for styling
-      barometer.className = 'barometer-fill throttle';
-    }
-  }
-  
-  updateBrakeBarometer(brakeFlag) {
-    const barometer = document.getElementById('brakeBarometer');
-    
-    if (barometer) {
-      // Calculate brake percentage based on recent brake activity
-      this.brakeHistory = this.brakeHistory || [];
-      this.brakeHistory.push(brakeFlag ? 1 : 0);
-      
-      // Keep only last 10 readings
-      if (this.brakeHistory.length > 10) {
-        this.brakeHistory.shift();
-      }
-      
-      // Calculate average brake activity
-      const brakePercent = (this.brakeHistory.reduce((a, b) => a + b, 0) / this.brakeHistory.length) * 100;
-      
-      barometer.style.width = `${brakePercent}%`;
-      
-      // Add brake class for styling
-      barometer.className = 'barometer-fill brake';
-    }
+    // Update GPS latitude display as simple number
+    this.updateElement('gpsLatitude', parseFloat(latitude).toFixed(6));
   }
   
   updateTimingStatus(raceTime, lapTime, remainingTime, remainingDistance) {
@@ -1475,12 +1843,448 @@ class RacingTelemetryDashboard {
     }
 }
 
-// Initialize the comprehensive racing telemetry dashboard
-document.addEventListener('DOMContentLoaded', () => {
-  console.log(' Initializing Racing Telemetry Dashboard...');
-  window.racingDashboard = new RacingTelemetryDashboard();
-  
-  // Dashboard displays comprehensive racing metrics in real-time
-  // All calculations are based on actual CSV telemetry data
-  console.log(' Racing Telemetry Dashboard initialized');
-});
+
+// F1-Style Telemetry Graphs using Plotly.js
+class F1TelemetryGraphs {
+  constructor() {
+    this.data = null;
+    this.lapFilter = 'all';
+    this.initializeGraphs();
+    this.setupEventListeners();
+  }
+
+  initializeGraphs() {
+    // Create placeholder graphs
+    this.createPlaceholderGraphs();
+  }
+
+  setupEventListeners() {
+    // Refresh button
+    const refreshBtn = document.getElementById('refreshGraphsBtn');
+    if (refreshBtn) {
+      refreshBtn.addEventListener('click', () => {
+        this.refreshGraphs();
+      });
+    }
+
+    // Lap filter
+    const lapFilter = document.getElementById('lapFilter');
+    if (lapFilter) {
+      lapFilter.addEventListener('change', (e) => {
+        this.lapFilter = e.target.value;
+        this.updateGraphs();
+      });
+    }
+  }
+
+  createPlaceholderGraphs() {
+    const darkLayout = {
+      paper_bgcolor: '#0a0a0a',
+      plot_bgcolor: '#0a0a0a',
+      font: { color: 'white', family: 'Arial, sans-serif' },
+      margin: { t: 40, r: 40, b: 60, l: 60 },
+      showlegend: true,
+      legend: { bgcolor: 'rgba(0,0,0,0)', font: { color: 'white' } }
+    };
+
+    // Current Heat Map placeholder
+    Plotly.newPlot('currentHeatMap', [{
+      x: [], y: [], mode: 'markers', name: 'Current',
+      marker: { 
+        color: [], 
+        colorscale: 'Hot',
+        size: 8,
+        opacity: 0.8,
+        colorbar: {
+          title: 'Current (mA)',
+          titlefont: { color: 'white' },
+          tickfont: { color: 'white' }
+        }
+      }
+    }], {
+      ...darkLayout,
+      title: { text: 'Current Consumption Heat Map', font: { color: '#00ccff' } },
+      xaxis: { title: 'Longitude', gridcolor: '#333' },
+      yaxis: { title: 'Latitude', gridcolor: '#333' }
+    });
+
+    // Net Energy Heat Map placeholder
+    Plotly.newPlot('energyHeatMap', [{
+      x: [], y: [], mode: 'markers', name: 'Net Energy',
+      marker: { 
+        color: [], 
+        colorscale: 'Viridis',
+        size: 8,
+        opacity: 0.8,
+        colorbar: {
+          title: 'Net Energy (J)',
+          titlefont: { color: 'white' },
+          tickfont: { color: 'white' }
+        }
+      }
+    }], {
+      ...darkLayout,
+      title: { text: 'Net Energy Consumption Heat Map', font: { color: '#ff4444' } },
+      xaxis: { title: 'Longitude', gridcolor: '#333' },
+      yaxis: { title: 'Latitude', gridcolor: '#333' }
+    });
+
+    // Speed Graph placeholder
+    Plotly.newPlot('speedGraph', [{
+      x: [], y: [], mode: 'lines', name: 'Speed',
+      line: { color: '#00ff00', width: 2 }
+    }], {
+      ...darkLayout,
+      title: { text: 'Speed vs Distance', font: { color: '#00ff00' } },
+      xaxis: { title: 'Distance (km)', gridcolor: '#333' },
+      yaxis: { title: 'Speed (km/h)', gridcolor: '#333' }
+    });
+
+    // Current Graph placeholder
+    Plotly.newPlot('currentGraph', [{
+      x: [], y: [], mode: 'lines', name: 'Current',
+      line: { color: '#00ccff', width: 2 }
+    }], {
+      ...darkLayout,
+      title: { text: 'Current vs Distance', font: { color: '#00ccff' } },
+      xaxis: { title: 'Distance (km)', gridcolor: '#333' },
+      yaxis: { title: 'Current (mA)', gridcolor: '#333' }
+    });
+
+    // Power Graph placeholder
+    Plotly.newPlot('powerGraph', [{
+      x: [], y: [], mode: 'lines', name: 'Power',
+      line: { color: '#ffd700', width: 2 }
+    }], {
+      ...darkLayout,
+      title: { text: 'Power vs Distance', font: { color: '#ffd700' } },
+      xaxis: { title: 'Distance (km)', gridcolor: '#333' },
+      yaxis: { title: 'Power (W)', gridcolor: '#333' }
+    });
+
+
+    // Acceleration Scatter placeholder
+    Plotly.newPlot('accelerationGraph', [{
+      x: [], y: [], mode: 'markers', name: 'Acceleration',
+      marker: { color: '#cc00ff', size: 6 }
+    }], {
+      ...darkLayout,
+      title: { text: 'Acceleration vs Speed', font: { color: '#cc00ff' } },
+      xaxis: { title: 'Speed (km/h)', gridcolor: '#333' },
+      yaxis: { title: 'Acceleration (m/s²)', gridcolor: '#333' }
+    });
+  }
+
+  setData(csvData) {
+    this.data = csvData;
+    this.processData();
+    this.updateGraphs();
+  }
+
+  processData() {
+    if (!this.data) return;
+
+    // Calculate power for each data point
+    this.data.forEach(row => {
+      row.power = (row.jm3_voltage * row.jm3_current) / 1000000; // Convert to watts
+    });
+
+    // Calculate moving average acceleration
+    const windowSize = 50;
+    for (let i = windowSize; i < this.data.length; i++) {
+      const prevRow = this.data[i - windowSize];
+      const currentRow = this.data[i];
+      const timeDiff = currentRow.obc_timestamp - prevRow.obc_timestamp;
+      if (timeDiff > 0) {
+        currentRow.acceleration = (currentRow.gps_speed - prevRow.gps_speed) / timeDiff;
+      } else {
+        currentRow.acceleration = 0;
+      }
+    }
+  }
+
+  refreshGraphs() {
+    if (window.racingDashboard && window.racingDashboard.csvData) {
+      this.setData(window.racingDashboard.csvData);
+    }
+  }
+
+  filterDataByLap(data) {
+    if (this.lapFilter === 'all') {
+      return data;
+    }
+    return data.filter(row => row.lap_lap == this.lapFilter);
+  }
+
+  updateGraphs() {
+    if (!this.data) return;
+
+    const filteredData = this.filterDataByLap(this.data);
+    
+    this.updateCurrentHeatMap(filteredData);
+    this.updateEnergyHeatMap(filteredData);
+    this.updateSpeedGraph(filteredData);
+    this.updateCurrentGraph(filteredData);
+    this.updatePowerGraph(filteredData);
+    this.updateAccelerationGraph(filteredData);
+  }
+
+  updateCurrentHeatMap(data) {
+    const gpsData = data.filter(row => 
+      row.gps_latitude && 
+      row.gps_longitude && 
+      row.jm3_current != null
+    );
+    if (gpsData.length === 0) return;
+
+    const trace = {
+      x: gpsData.map(row => row.gps_longitude),
+      y: gpsData.map(row => row.gps_latitude),
+      mode: 'markers',
+      name: 'Current Consumption',
+      marker: { 
+        color: gpsData.map(row => parseFloat(row.jm3_current || 0)),
+        colorscale: 'Hot',
+        size: 8,
+        opacity: 0.8,
+        colorbar: {
+          title: 'Current (mA)',
+          titlefont: { color: 'white' },
+          tickfont: { color: 'white' }
+        }
+      },
+      text: gpsData.map(row => 
+        `Lap: ${parseInt(row.lap_lap) + 1}<br>` +
+        `Current: ${parseFloat(row.jm3_current || 0).toFixed(1)} mA<br>` +
+        `Distance: ${row.lap_dist ? parseFloat(row.lap_dist).toFixed(2) : 'N/A'} km`
+      ),
+      hovertemplate: '%{text}<extra></extra>'
+    };
+
+    Plotly.react('currentHeatMap', [trace], {
+      paper_bgcolor: '#0a0a0a',
+      plot_bgcolor: '#0a0a0a',
+      font: { color: 'white' },
+      title: { text: 'Current Consumption Heat Map', font: { color: '#00ccff' } },
+      xaxis: { title: 'Longitude', gridcolor: '#333' },
+      yaxis: { title: 'Latitude', gridcolor: '#333' },
+      margin: { t: 40, r: 40, b: 60, l: 60 },
+      showlegend: false
+    });
+  }
+
+  updateEnergyHeatMap(data) {
+    const gpsData = data.filter(row => 
+      row.gps_latitude && 
+      row.gps_longitude && 
+      row.jm3_netjoule != null
+    );
+    if (gpsData.length === 0) return;
+
+    const trace = {
+      x: gpsData.map(row => row.gps_longitude),
+      y: gpsData.map(row => row.gps_latitude),
+      mode: 'markers',
+      name: 'Net Energy Consumption',
+      marker: { 
+        color: gpsData.map(row => parseFloat(row.jm3_netjoule || 0)),
+        colorscale: 'Viridis',
+        size: 8,
+        opacity: 0.8,
+        colorbar: {
+          title: 'Net Energy (J)',
+          titlefont: { color: 'white' },
+          tickfont: { color: 'white' }
+        }
+      },
+      text: gpsData.map(row => 
+        `Lap: ${parseInt(row.lap_lap) + 1}<br>` +
+        `Net Energy: ${parseFloat(row.jm3_netjoule || 0).toFixed(1)} J<br>` +
+        `Distance: ${row.lap_dist ? parseFloat(row.lap_dist).toFixed(2) : 'N/A'} km`
+      ),
+      hovertemplate: '%{text}<extra></extra>'
+    };
+
+    Plotly.react('energyHeatMap', [trace], {
+      paper_bgcolor: '#0a0a0a',
+      plot_bgcolor: '#0a0a0a',
+      font: { color: 'white' },
+      title: { text: 'Net Energy Consumption Heat Map', font: { color: '#ff4444' } },
+      xaxis: { title: 'Longitude', gridcolor: '#333' },
+      yaxis: { title: 'Latitude', gridcolor: '#333' },
+      margin: { t: 40, r: 40, b: 60, l: 60 },
+      showlegend: false
+    });
+  }
+
+  updateSpeedGraph(data) {
+    const speedData = data.filter(row => row.lap_dist != null && row.gps_speed != null);
+    if (speedData.length === 0) return;
+
+    const lapColors = ['#00ff00', '#00ccff', '#ffd700', '#ff4444', '#cc00ff', '#ff6b35'];
+    const traces = [];
+
+    if (this.lapFilter === 'all') {
+      const laps = [...new Set(speedData.map(row => row.lap_lap))].filter(lap => lap != null);
+      
+      laps.forEach((lap, index) => {
+        const lapData = speedData.filter(row => row.lap_lap === lap);
+        traces.push({
+          x: lapData.map(row => row.lap_dist),
+          y: lapData.map(row => row.gps_speed),
+          mode: 'lines',
+          name: `Lap ${parseInt(lap) + 1}`,
+          line: { color: lapColors[index % lapColors.length], width: 2 }
+        });
+      });
+    } else {
+      traces.push({
+        x: speedData.map(row => row.lap_dist),
+        y: speedData.map(row => row.gps_speed),
+        mode: 'lines',
+        name: `Lap ${parseInt(this.lapFilter) + 1}`,
+        line: { color: '#00ff00', width: 2 }
+      });
+    }
+
+    Plotly.react('speedGraph', traces, {
+      paper_bgcolor: '#0a0a0a',
+      plot_bgcolor: '#0a0a0a',
+      font: { color: 'white' },
+      title: { text: 'Speed vs Distance', font: { color: '#00ff00' } },
+      xaxis: { title: 'Distance (km)', gridcolor: '#333' },
+      yaxis: { title: 'Speed (km/h)', gridcolor: '#333' },
+      margin: { t: 40, r: 40, b: 60, l: 60 },
+      showlegend: true,
+      legend: { bgcolor: 'rgba(0,0,0,0)', font: { color: 'white' } }
+    });
+  }
+
+  updateCurrentGraph(data) {
+    const currentData = data.filter(row => row.lap_dist != null && row.jm3_current != null);
+    if (currentData.length === 0) return;
+
+    const lapColors = ['#00ccff', '#ffd700', '#ff4444', '#cc00ff', '#ff6b35', '#00ff00'];
+    const traces = [];
+
+    if (this.lapFilter === 'all') {
+      const laps = [...new Set(currentData.map(row => row.lap_lap))].filter(lap => lap != null);
+      
+      laps.forEach((lap, index) => {
+        const lapData = currentData.filter(row => row.lap_lap === lap);
+        traces.push({
+          x: lapData.map(row => row.lap_dist),
+          y: lapData.map(row => row.jm3_current),
+          mode: 'lines',
+          name: `Lap ${parseInt(lap) + 1}`,
+          line: { color: lapColors[index % lapColors.length], width: 2 }
+        });
+      });
+    } else {
+      traces.push({
+        x: currentData.map(row => row.lap_dist),
+        y: currentData.map(row => row.jm3_current),
+        mode: 'lines',
+        name: `Lap ${parseInt(this.lapFilter) + 1}`,
+        line: { color: '#00ccff', width: 2 }
+      });
+    }
+
+    Plotly.react('currentGraph', traces, {
+      paper_bgcolor: '#0a0a0a',
+      plot_bgcolor: '#0a0a0a',
+      font: { color: 'white' },
+      title: { text: 'Current vs Distance', font: { color: '#00ccff' } },
+      xaxis: { title: 'Distance (km)', gridcolor: '#333' },
+      yaxis: { title: 'Current (mA)', gridcolor: '#333' },
+      margin: { t: 40, r: 40, b: 60, l: 60 },
+      showlegend: true,
+      legend: { bgcolor: 'rgba(0,0,0,0)', font: { color: 'white' } }
+    });
+  }
+
+  updatePowerGraph(data) {
+    const powerData = data.filter(row => row.lap_dist != null && row.power != null);
+    if (powerData.length === 0) return;
+
+    const lapColors = ['#ffd700', '#ff4444', '#cc00ff', '#ff6b35', '#00ff00', '#00ccff'];
+    const traces = [];
+
+    if (this.lapFilter === 'all') {
+      const laps = [...new Set(powerData.map(row => row.lap_lap))].filter(lap => lap != null);
+      
+      laps.forEach((lap, index) => {
+        const lapData = powerData.filter(row => row.lap_lap === lap);
+        traces.push({
+          x: lapData.map(row => row.lap_dist),
+          y: lapData.map(row => row.power),
+          mode: 'lines',
+          name: `Lap ${parseInt(lap) + 1}`,
+          line: { color: lapColors[index % lapColors.length], width: 2 }
+        });
+      });
+    } else {
+      traces.push({
+        x: powerData.map(row => row.lap_dist),
+        y: powerData.map(row => row.power),
+        mode: 'lines',
+        name: `Lap ${parseInt(this.lapFilter) + 1}`,
+        line: { color: '#ffd700', width: 2 }
+      });
+    }
+
+    Plotly.react('powerGraph', traces, {
+      paper_bgcolor: '#0a0a0a',
+      plot_bgcolor: '#0a0a0a',
+      font: { color: 'white' },
+      title: { text: 'Power vs Distance', font: { color: '#ffd700' } },
+      xaxis: { title: 'Distance (km)', gridcolor: '#333' },
+      yaxis: { title: 'Power (W)', gridcolor: '#333' },
+      margin: { t: 40, r: 40, b: 60, l: 60 },
+      showlegend: true,
+      legend: { bgcolor: 'rgba(0,0,0,0)', font: { color: 'white' } }
+    });
+  }
+
+
+  updateAccelerationGraph(data) {
+    const accelData = data.filter(row => 
+      row.gps_speed != null && 
+      row.acceleration != null && 
+      !isNaN(row.acceleration) &&
+      Math.abs(row.acceleration) < 10 // Filter out unrealistic values
+    );
+    
+    if (accelData.length === 0) return;
+
+    const trace = {
+      x: accelData.map(row => row.gps_speed),
+      y: accelData.map(row => row.acceleration),
+      mode: 'markers',
+      name: 'Acceleration vs Speed',
+      marker: { 
+        color: accelData.map(row => row.power || 0),
+        colorscale: 'Hot',
+        size: 6,
+        opacity: 0.7,
+        colorbar: {
+          title: 'Power (W)',
+          titlefont: { color: 'white' },
+          tickfont: { color: 'white' }
+        }
+      }
+    };
+
+    Plotly.react('accelerationGraph', [trace], {
+      paper_bgcolor: '#0a0a0a',
+      plot_bgcolor: '#0a0a0a',
+      font: { color: 'white' },
+      title: { text: 'Acceleration vs Speed (Colored by Power)', font: { color: '#cc00ff' } },
+      xaxis: { title: 'Speed (km/h)', gridcolor: '#333' },
+      yaxis: { title: 'Acceleration (m/s²)', gridcolor: '#333' },
+      margin: { t: 40, r: 40, b: 60, l: 60 },
+      showlegend: false
+    });
+  }
+}
+
