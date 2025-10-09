@@ -845,11 +845,12 @@ class RacingTelemetryDashboard {
     const speedData = this.realtimeGraphData;
     if (speedData.length === 0) return;
     
-    // Create distance array (simplified - using index as distance)
-    const distances = speedData.map((_, index) => index * 0.01); // 0.01 km per point
+    // Create time array (seconds since first data point)
+    const startTime = speedData[0].timestamp;
+    const times = speedData.map(d => (d.timestamp - startTime) / 1000); // Convert to seconds
     
     const trace = {
-      x: distances,
+      x: times,
       y: speedData.map(d => d.speed),
       mode: 'lines',
       name: 'Speed',
@@ -860,8 +861,8 @@ class RacingTelemetryDashboard {
       paper_bgcolor: '#0a0a0a',
       plot_bgcolor: '#0a0a0a',
       font: { color: 'white' },
-      title: { text: 'Speed vs Distance', font: { color: '#00ff00' } },
-      xaxis: { title: 'Distance (km)', gridcolor: '#333' },
+      title: { text: 'Speed vs Time', font: { color: '#00ff00' } },
+      xaxis: { title: 'Time (s)', gridcolor: '#333' },
       yaxis: { title: 'Speed (km/h)', gridcolor: '#333' },
       margin: { t: 40, r: 40, b: 60, l: 60 },
       showlegend: false
@@ -872,10 +873,12 @@ class RacingTelemetryDashboard {
     const currentData = this.realtimeGraphData;
     if (currentData.length === 0) return;
     
-    const distances = currentData.map((_, index) => index * 0.01);
+    // Create time array (seconds since first data point)
+    const startTime = currentData[0].timestamp;
+    const times = currentData.map(d => (d.timestamp - startTime) / 1000); // Convert to seconds
     
     const trace = {
-      x: distances,
+      x: times,
       y: currentData.map(d => d.current),
       mode: 'lines',
       name: 'Current',
@@ -886,8 +889,8 @@ class RacingTelemetryDashboard {
       paper_bgcolor: '#0a0a0a',
       plot_bgcolor: '#0a0a0a',
       font: { color: 'white' },
-      title: { text: 'Current vs Distance', font: { color: '#00ccff' } },
-      xaxis: { title: 'Distance (km)', gridcolor: '#333' },
+      title: { text: 'Current vs Time', font: { color: '#00ccff' } },
+      xaxis: { title: 'Time (s)', gridcolor: '#333' },
       yaxis: { title: 'Current (A)', gridcolor: '#333' },
       margin: { t: 40, r: 40, b: 60, l: 60 },
       showlegend: false
@@ -898,10 +901,12 @@ class RacingTelemetryDashboard {
     const powerData = this.realtimeGraphData;
     if (powerData.length === 0) return;
     
-    const distances = powerData.map((_, index) => index * 0.01);
+    // Create time array (seconds since first data point)
+    const startTime = powerData[0].timestamp;
+    const times = powerData.map(d => (d.timestamp - startTime) / 1000); // Convert to seconds
     
     const trace = {
-      x: distances,
+      x: times,
       y: powerData.map(d => d.power),
       mode: 'lines',
       name: 'Power',
@@ -912,8 +917,8 @@ class RacingTelemetryDashboard {
       paper_bgcolor: '#0a0a0a',
       plot_bgcolor: '#0a0a0a',
       font: { color: 'white' },
-      title: { text: 'Power vs Distance', font: { color: '#ffd700' } },
-      xaxis: { title: 'Distance (km)', gridcolor: '#333' },
+      title: { text: 'Power vs Time', font: { color: '#ffd700' } },
+      xaxis: { title: 'Time (s)', gridcolor: '#333' },
       yaxis: { title: 'Power (W)', gridcolor: '#333' },
       margin: { t: 40, r: 40, b: 60, l: 60 },
       showlegend: false
@@ -2440,21 +2445,28 @@ class F1TelemetryGraphs {
       showlegend: false
     });
   }
-
   updateSpeedGraph(data) {
-    const speedData = data.filter(row => row.lap_dist != null && row.gps_speed != null);
+    // Filter out invalid data
+    const speedData = data.filter(row => row.gps_speed != null && row.obc_timestamp != null);
     if (speedData.length === 0) return;
-
+  
     const lapColors = ['#00ff00', '#00ccff', '#ffd700', '#ff4444', '#cc00ff', '#ff6b35'];
     const traces = [];
-
+  
+    // Use the first timestamp as start time for relative time calculation
+    const startTime = speedData[0].obc_timestamp;
+  
+    // Compute elapsed time (in seconds) for x-axis using data timestamps
+    const elapsedTimes = speedData.map(row => row.obc_timestamp - startTime);
+  
     if (this.lapFilter === 'all') {
       const laps = [...new Set(speedData.map(row => row.lap_lap))].filter(lap => lap != null);
-      
+  
       laps.forEach((lap, index) => {
         const lapData = speedData.filter(row => row.lap_lap === lap);
+        const lapElapsed = lapData.map(row => row.obc_timestamp - startTime);
         traces.push({
-          x: lapData.map(row => row.lap_dist),
+          x: lapElapsed,
           y: lapData.map(row => row.gps_speed),
           mode: 'lines',
           name: `Lap ${parseInt(lap) + 1}`,
@@ -2463,26 +2475,27 @@ class F1TelemetryGraphs {
       });
     } else {
       traces.push({
-        x: speedData.map(row => row.lap_dist),
+        x: elapsedTimes,
         y: speedData.map(row => row.gps_speed),
         mode: 'lines',
         name: `Lap ${parseInt(this.lapFilter) + 1}`,
         line: { color: '#00ff00', width: 2 }
       });
     }
-
+  
     Plotly.react('speedGraph', traces, {
       paper_bgcolor: '#0a0a0a',
       plot_bgcolor: '#0a0a0a',
       font: { color: 'white' },
-      title: { text: 'Speed vs Distance', font: { color: '#00ff00' } },
-      xaxis: { title: 'Distance (km)', gridcolor: '#333' },
+      title: { text: 'Speed vs Time', font: { color: '#00ff00' } },
+      xaxis: { title: 'Time (s)', gridcolor: '#333' },
       yaxis: { title: 'Speed (km/h)', gridcolor: '#333' },
       margin: { t: 40, r: 40, b: 60, l: 60 },
       showlegend: true,
       legend: { bgcolor: 'rgba(0,0,0,0)', font: { color: 'white' } }
     });
   }
+  
 
   updateCurrentGraph(data) {
     const currentData = data.filter(row => row.lap_dist != null && row.jm3_current != null);
