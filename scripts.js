@@ -615,6 +615,7 @@ class RacingTelemetryDashboard {
       
       if (data.current !== undefined) {
         this.currentTelemetry.current = parseFloat(data.current) || 0;
+        console.log('🔌 Parsed current from broker:', data.current, '→', this.currentTelemetry.current);
       }
       
       if (data.power !== undefined) {
@@ -973,12 +974,12 @@ class RacingTelemetryDashboard {
 
   updateTelemetryFromMqtt() {
     // Update all dashboard elements with current telemetry data
-    this.updateElement('mainSpeed', this.currentTelemetry.speed > 0 ? this.currentTelemetry.speed.toFixed(1) : '0');
+    this.updateElement('mainSpeed', this.currentTelemetry.speed.toFixed(1));
     this.updateElement('avgSpeed', this.currentTelemetry.speed > 0 ? this.currentTelemetry.speed.toFixed(1) : '-');
     this.updateElement('voltage', this.currentTelemetry.voltage > 0 ? this.currentTelemetry.voltage.toFixed(1) : '-');
-    this.updateElement('current', this.currentTelemetry.current > 0 ? this.currentTelemetry.current.toFixed(1) : '-');
+    this.updateElement('current', this.currentTelemetry.current.toFixed(1));
     this.updateElement('power', this.currentTelemetry.power > 0 ? this.currentTelemetry.power.toFixed(0) : '-');
-    this.updateElement('totalEnergy', this.currentTelemetry.totalEnergy > 0 ? this.currentTelemetry.totalEnergy.toFixed(0) : '-');
+    this.updateElement('totalEnergy', this.currentTelemetry.rpm.toFixed(0));
     this.updateElement('consumption', this.currentTelemetry.consumption > 0 ? this.currentTelemetry.consumption.toFixed(0) : '-');
     this.updateElement('efficiency', this.currentTelemetry.efficiency > 0 ? this.currentTelemetry.efficiency.toFixed(1) : '-');
     this.updateElement('gpsLongitude', this.currentTelemetry.longitude !== 0 ? this.currentTelemetry.longitude.toFixed(6) : '-');
