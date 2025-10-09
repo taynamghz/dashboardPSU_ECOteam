@@ -360,6 +360,10 @@ class RacingTelemetryDashboard {
       consumption: []
     };
     
+    // Real-time graph data storage
+    this.realtimeGraphData = [];
+    this.energyStartTime = null;
+    
     // Maximum data points to keep
     this.maxDataPoints = 1000;
     
@@ -602,61 +606,369 @@ class RacingTelemetryDashboard {
       }
       
       const data = JSON.parse(message);
-      console.log('Received telemetry data:', data);
+      console.log('📡 Received Arduino telemetry data:', data);
       
-      // Parse voltage data
-      if (data.voltage) {
+      // Parse Arduino payload: voltage, current, power, rpm, speed, lat, lon
+      if (data.voltage !== undefined) {
         this.currentTelemetry.voltage = parseFloat(data.voltage) || 0;
       }
       
-      // Parse current data
-      if (data.current) {
+      if (data.current !== undefined) {
         this.currentTelemetry.current = parseFloat(data.current) || 0;
       }
       
-      // Parse power data
-      if (data.power) {
+      if (data.power !== undefined) {
         this.currentTelemetry.power = parseFloat(data.power) || 0;
       } else {
-        // Calculate power if not provided
+        // Calculate power if not provided: P = V × I
         this.currentTelemetry.power = this.currentTelemetry.voltage * this.currentTelemetry.current;
       }
       
-      // Parse RPM data (not used in dashboard but available)
-      if (data.rpm) {
+      if (data.rpm !== undefined) {
         this.currentTelemetry.rpm = parseFloat(data.rpm) || 0;
       }
       
-      // Parse speed data
-      if (data.speed) {
+      if (data.speed !== undefined) {
         this.currentTelemetry.speed = parseFloat(data.speed) || 0;
       }
       
-      // Parse GPS data (format: "latitude, longitude")
-      if (data.gps) {
-        const gpsParts = data.gps.split(',');
-        if (gpsParts.length >= 2) {
-          this.currentTelemetry.latitude = parseFloat(gpsParts[0].trim()) || 0;
-          this.currentTelemetry.longitude = parseFloat(gpsParts[1].trim()) || 0;
-        }
+      // Parse GPS coordinates from Arduino payload
+      if (data.lat !== undefined && data.lon !== undefined) {
+        this.currentTelemetry.latitude = parseFloat(data.lat) || 0;
+        this.currentTelemetry.longitude = parseFloat(data.lon) || 0;
       }
       
-      // Set default values for missing data (will show as 0 or -)
-      this.currentTelemetry.totalEnergy = this.currentTelemetry.totalEnergy || 0;
-      this.currentTelemetry.consumption = this.currentTelemetry.consumption || 0;
-      this.currentTelemetry.efficiency = this.currentTelemetry.efficiency || 0;
-      this.currentTelemetry.distance = this.currentTelemetry.distance || 0;
+      // Calculate additional metrics for dashboard
+      this.calculateTelemetryMetrics();
       
       // Update dashboard with new data
       this.updateTelemetryFromMqtt();
       
+      // Update track visualizer with GPS position
+      this.updateTrackPosition();
+      
+      // Store data for graphs
+      this.storeTelemetryForGraphs();
+      
     } catch (error) {
-      console.error('Error parsing MQTT message:', error);
+      console.error('❌ Error parsing MQTT message:', error);
     }
+  }
+
+  calculateTelemetryMetrics() {
+    // Calculate efficiency: km/kWh (simplified calculation)
+    if (this.currentTelemetry.power > 0 && this.currentTelemetry.speed > 0) {
+      // Efficiency = speed / (power / 1000) * 3600 / 1000 = speed * 3.6 / (power / 1000)
+      this.currentTelemetry.efficiency = (this.currentTelemetry.speed * 3.6) / (this.currentTelemetry.power / 1000);
+    } else {
+      this.currentTelemetry.efficiency = 0;
+    }
+    
+    // Calculate consumption: Wh/km
+    if (this.currentTelemetry.speed > 0) {
+      this.currentTelemetry.consumption = this.currentTelemetry.power / this.currentTelemetry.speed;
+    } else {
+      this.currentTelemetry.consumption = 0;
+    }
+    
+    // Update total energy (cumulative)
+    if (!this.energyStartTime) {
+      this.energyStartTime = Date.now();
+    }
+    
+    const timeDelta = (Date.now() - this.energyStartTime) / 1000; // seconds
+    this.currentTelemetry.totalEnergy += (this.currentTelemetry.power * timeDelta) / 3600; // Wh
+    
+    // Reset energy start time for next calculation
+    this.energyStartTime = Date.now();
+    
+    console.log('📊 Calculated metrics:', {
+      efficiency: this.currentTelemetry.efficiency,
+      consumption: this.currentTelemetry.consumption,
+      totalEnergy: this.currentTelemetry.totalEnergy
+    });
+  }
+
+  updateTrackPosition() {
+    if (this.currentTelemetry.latitude !== 0 && this.currentTelemetry.longitude !== 0) {
+      // Update 2D Track Visualizer with new position
+      if (window.trackVisualizer) {
+        console.log(`📍 Updating track position: ${this.currentTelemetry.latitude}, ${this.currentTelemetry.longitude}`);
+        window.trackVisualizer.updatePosition(this.currentTelemetry.latitude, this.currentTelemetry.longitude);
+      }
+    }
+  }
+
+  storeTelemetryForGraphs() {
+    // Store current telemetry data for graph updates
+    const timestamp = Date.now();
+    
+    // Add to data history for graphs
+    this.dataHistory.volts.push(this.currentTelemetry.voltage);
+    this.dataHistory.current.push(this.currentTelemetry.current);
+    this.dataHistory.efficiency.push(this.currentTelemetry.efficiency);
+    this.dataHistory.consumption.push(this.currentTelemetry.consumption);
+    
+    // Keep only the last maxDataPoints
+    Object.keys(this.dataHistory).forEach(key => {
+      if (this.dataHistory[key].length > this.maxDataPoints) {
+        this.dataHistory[key].shift();
+      }
+    });
+    
+    // Update F1 graphs if available
+    if (window.f1Graphs && this.dataHistory.volts.length > 10) {
+      // Create a data point for the graph
+      const graphData = {
+        timestamp: timestamp,
+        voltage: this.currentTelemetry.voltage,
+        current: this.currentTelemetry.current,
+        power: this.currentTelemetry.power,
+        speed: this.currentTelemetry.speed,
+        lat: this.currentTelemetry.latitude,
+        lon: this.currentTelemetry.longitude,
+        efficiency: this.currentTelemetry.efficiency,
+        consumption: this.currentTelemetry.consumption
+      };
+      
+      // Update graphs with new data point
+      this.updateGraphsWithNewData(graphData);
+    }
+  }
+
+  updateGraphsWithNewData(dataPoint) {
+    // This method will be called to update graphs in real-time
+    // For now, we'll trigger a refresh of the graphs
+    if (window.f1Graphs) {
+      // Store the data point for graph updates
+      if (!this.realtimeGraphData) {
+        this.realtimeGraphData = [];
+      }
+      
+      this.realtimeGraphData.push(dataPoint);
+      
+      // Keep only last 1000 points for performance
+      if (this.realtimeGraphData.length > 1000) {
+        this.realtimeGraphData = this.realtimeGraphData.slice(-1000);
+      }
+      
+      // Update graphs every 10 data points to avoid too frequent updates
+      if (this.realtimeGraphData.length % 10 === 0) {
+        this.updateRealtimeGraphs();
+      }
+    }
+  }
+
+  updateRealtimeGraphs() {
+    if (!this.realtimeGraphData || this.realtimeGraphData.length === 0) return;
+    
+    // Update heat maps with current data
+    this.updateCurrentHeatMapRealtime();
+    this.updateEnergyHeatMapRealtime();
+    
+    // Update line graphs with current data
+    this.updateSpeedGraphRealtime();
+    this.updateCurrentGraphRealtime();
+    this.updatePowerGraphRealtime();
+    this.updateAccelerationGraphRealtime();
+  }
+
+  updateCurrentHeatMapRealtime() {
+    const currentData = this.realtimeGraphData.filter(d => d.lat !== 0 && d.lon !== 0);
+    if (currentData.length === 0) return;
+    
+    const trace = {
+      x: currentData.map(d => d.lon),
+      y: currentData.map(d => d.lat),
+      mode: 'markers',
+      name: 'Current Consumption',
+      marker: { 
+        color: currentData.map(d => d.current),
+        colorscale: 'Hot',
+        size: 8,
+        opacity: 0.8,
+        colorbar: {
+          title: 'Current (A)',
+          titlefont: { color: 'white' },
+          tickfont: { color: 'white' }
+        }
+      }
+    };
+    
+    Plotly.react('currentHeatMap', [trace], {
+      paper_bgcolor: '#0a0a0a',
+      plot_bgcolor: '#0a0a0a',
+      font: { color: 'white' },
+      title: { text: 'Current Consumption Heat Map', font: { color: '#00ccff' } },
+      xaxis: { title: 'Longitude', gridcolor: '#333' },
+      yaxis: { title: 'Latitude', gridcolor: '#333' },
+      margin: { t: 40, r: 40, b: 60, l: 60 },
+      showlegend: false
+    });
+  }
+
+  updateEnergyHeatMapRealtime() {
+    const energyData = this.realtimeGraphData.filter(d => d.lat !== 0 && d.lon !== 0);
+    if (energyData.length === 0) return;
+    
+    const trace = {
+      x: energyData.map(d => d.lon),
+      y: energyData.map(d => d.lat),
+      mode: 'markers',
+      name: 'Power Consumption',
+      marker: { 
+        color: energyData.map(d => d.power),
+        colorscale: 'Viridis',
+        size: 8,
+        opacity: 0.8,
+        colorbar: {
+          title: 'Power (W)',
+          titlefont: { color: 'white' },
+          tickfont: { color: 'white' }
+        }
+      }
+    };
+    
+    Plotly.react('energyHeatMap', [trace], {
+      paper_bgcolor: '#0a0a0a',
+      plot_bgcolor: '#0a0a0a',
+      font: { color: 'white' },
+      title: { text: 'Power Consumption Heat Map', font: { color: '#ff4444' } },
+      xaxis: { title: 'Longitude', gridcolor: '#333' },
+      yaxis: { title: 'Latitude', gridcolor: '#333' },
+      margin: { t: 40, r: 40, b: 60, l: 60 },
+      showlegend: false
+    });
+  }
+
+  updateSpeedGraphRealtime() {
+    const speedData = this.realtimeGraphData;
+    if (speedData.length === 0) return;
+    
+    // Create distance array (simplified - using index as distance)
+    const distances = speedData.map((_, index) => index * 0.01); // 0.01 km per point
+    
+    const trace = {
+      x: distances,
+      y: speedData.map(d => d.speed),
+      mode: 'lines',
+      name: 'Speed',
+      line: { color: '#00ff00', width: 2 }
+    };
+    
+    Plotly.react('speedGraph', [trace], {
+      paper_bgcolor: '#0a0a0a',
+      plot_bgcolor: '#0a0a0a',
+      font: { color: 'white' },
+      title: { text: 'Speed vs Distance', font: { color: '#00ff00' } },
+      xaxis: { title: 'Distance (km)', gridcolor: '#333' },
+      yaxis: { title: 'Speed (km/h)', gridcolor: '#333' },
+      margin: { t: 40, r: 40, b: 60, l: 60 },
+      showlegend: false
+    });
+  }
+
+  updateCurrentGraphRealtime() {
+    const currentData = this.realtimeGraphData;
+    if (currentData.length === 0) return;
+    
+    const distances = currentData.map((_, index) => index * 0.01);
+    
+    const trace = {
+      x: distances,
+      y: currentData.map(d => d.current),
+      mode: 'lines',
+      name: 'Current',
+      line: { color: '#00ccff', width: 2 }
+    };
+    
+    Plotly.react('currentGraph', [trace], {
+      paper_bgcolor: '#0a0a0a',
+      plot_bgcolor: '#0a0a0a',
+      font: { color: 'white' },
+      title: { text: 'Current vs Distance', font: { color: '#00ccff' } },
+      xaxis: { title: 'Distance (km)', gridcolor: '#333' },
+      yaxis: { title: 'Current (A)', gridcolor: '#333' },
+      margin: { t: 40, r: 40, b: 60, l: 60 },
+      showlegend: false
+    });
+  }
+
+  updatePowerGraphRealtime() {
+    const powerData = this.realtimeGraphData;
+    if (powerData.length === 0) return;
+    
+    const distances = powerData.map((_, index) => index * 0.01);
+    
+    const trace = {
+      x: distances,
+      y: powerData.map(d => d.power),
+      mode: 'lines',
+      name: 'Power',
+      line: { color: '#ffd700', width: 2 }
+    };
+    
+    Plotly.react('powerGraph', [trace], {
+      paper_bgcolor: '#0a0a0a',
+      plot_bgcolor: '#0a0a0a',
+      font: { color: 'white' },
+      title: { text: 'Power vs Distance', font: { color: '#ffd700' } },
+      xaxis: { title: 'Distance (km)', gridcolor: '#333' },
+      yaxis: { title: 'Power (W)', gridcolor: '#333' },
+      margin: { t: 40, r: 40, b: 60, l: 60 },
+      showlegend: false
+    });
+  }
+
+  updateAccelerationGraphRealtime() {
+    const accelData = this.realtimeGraphData;
+    if (accelData.length < 2) return;
+    
+    // Calculate acceleration from speed data
+    const accelerations = [];
+    for (let i = 1; i < accelData.length; i++) {
+      const prevSpeed = accelData[i-1].speed;
+      const currSpeed = accelData[i].speed;
+      const timeDiff = 0.1; // Assume 0.1s between measurements
+      const acceleration = (currSpeed - prevSpeed) / timeDiff; // m/s²
+      accelerations.push(acceleration);
+    }
+    
+    const speeds = accelData.slice(1).map(d => d.speed);
+    
+    const trace = {
+      x: speeds,
+      y: accelerations,
+      mode: 'markers',
+      name: 'Acceleration vs Speed',
+      marker: { 
+        color: accelData.slice(1).map(d => d.power),
+        colorscale: 'Hot',
+        size: 6,
+        opacity: 0.7,
+        colorbar: {
+          title: 'Power (W)',
+          titlefont: { color: 'white' },
+          tickfont: { color: 'white' }
+        }
+      }
+    };
+    
+    Plotly.react('accelerationGraph', [trace], {
+      paper_bgcolor: '#0a0a0a',
+      plot_bgcolor: '#0a0a0a',
+      font: { color: 'white' },
+      title: { text: 'Acceleration vs Speed (Colored by Power)', font: { color: '#cc00ff' } },
+      xaxis: { title: 'Speed (km/h)', gridcolor: '#333' },
+      yaxis: { title: 'Acceleration (m/s²)', gridcolor: '#333' },
+      margin: { t: 40, r: 40, b: 60, l: 60 },
+      showlegend: false
+    });
   }
 
   updateTelemetryFromMqtt() {
     // Update all dashboard elements with current telemetry data
+    this.updateElement('mainSpeed', this.currentTelemetry.speed > 0 ? this.currentTelemetry.speed.toFixed(1) : '0');
     this.updateElement('avgSpeed', this.currentTelemetry.speed > 0 ? this.currentTelemetry.speed.toFixed(1) : '-');
     this.updateElement('voltage', this.currentTelemetry.voltage > 0 ? this.currentTelemetry.voltage.toFixed(1) : '-');
     this.updateElement('current', this.currentTelemetry.current > 0 ? this.currentTelemetry.current.toFixed(1) : '-');
@@ -666,6 +978,17 @@ class RacingTelemetryDashboard {
     this.updateElement('efficiency', this.currentTelemetry.efficiency > 0 ? this.currentTelemetry.efficiency.toFixed(1) : '-');
     this.updateElement('gpsLongitude', this.currentTelemetry.longitude !== 0 ? this.currentTelemetry.longitude.toFixed(6) : '-');
     this.updateElement('gpsLatitude', this.currentTelemetry.latitude !== 0 ? this.currentTelemetry.latitude.toFixed(6) : '-');
+    
+    // Update main efficiency display
+    this.updateElement('mainEfficiency', this.currentTelemetry.efficiency > 0 ? this.currentTelemetry.efficiency.toFixed(1) : '0');
+    
+    console.log('📊 Updated dashboard with Arduino data:', {
+      speed: this.currentTelemetry.speed,
+      voltage: this.currentTelemetry.voltage,
+      current: this.currentTelemetry.current,
+      power: this.currentTelemetry.power,
+      efficiency: this.currentTelemetry.efficiency
+    });
   }
 
   hideTrackOverlay() {
@@ -698,6 +1021,7 @@ class RacingTelemetryDashboard {
       console.error('❌ Test button not found!');
     }
   }
+
 
   // Simple MQTT test function (can be called from console)
   async simpleMqttTest() {
