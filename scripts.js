@@ -449,8 +449,12 @@ class RacingTelemetryDashboard {
       distance: 0,
       lapDistance: 0,
       lap: 0,
-      timestamp: 0
+      timestamp: 0,
+      rpm: 0
     };
+    
+    // Distance reset offset (for reset button)
+    this.distanceOffset = 0;
     
     // Data history for graphs
     this.dataHistory = {
@@ -495,6 +499,17 @@ class RacingTelemetryDashboard {
     console.log('📊 Telemetry updated, now loading track...');
     await this.loadTrackShape(); // Automatically load track on startup
     this.setupTestButton(); // Setup MQTT test button
+    this.setupResetButton(); // Setup distance reset button
+  }
+  
+  setupResetButton() {
+    const resetBtn = document.getElementById('resetDistanceBtn');
+    if (resetBtn) {
+      resetBtn.addEventListener('click', () => {
+        this.resetDistance();
+      });
+      console.log('✅ Distance reset button setup complete');
+    }
   }
   
   
@@ -706,6 +721,10 @@ class RacingTelemetryDashboard {
       }
       
       const data = JSON.parse(message);
+      // Avoid processing our own echo messages to prevent loops
+      if (data && data.source === 'dashboard') {
+        return;
+      }
       console.log('📡 Received Arduino telemetry data:', data);
       
       // Parse Arduino payload: voltage, current, power, rpm, speed, lat, lon
@@ -733,6 +752,11 @@ class RacingTelemetryDashboard {
         this.currentTelemetry.speed = parseFloat(data.speed) || 0;
       }
       
+      // Parse distance_km from payload
+      if (data.distance_km !== undefined) {
+        this.currentTelemetry.distance = parseFloat(data.distance_km) || 0;
+      }
+      
       // Parse GPS coordinates from payload (support multiple key variants)
       if (data.lat !== undefined && (data.lon !== undefined || data.lng !== undefined)) {
         this.currentTelemetry.latitude = parseFloat(data.lat) || 0;
@@ -754,31 +778,76 @@ class RacingTelemetryDashboard {
       // Update only the displayed GPS values in real time (no pointer move)
       this.updateGPSDisplay(this.currentTelemetry.latitude, this.currentTelemetry.longitude);
       
+      // Persist telemetry to backend CSV log (best-effort)
+      this.logTelemetryPacket({
+        timestamp: Date.now(),
+        voltage: this.currentTelemetry.voltage,
+        current: this.currentTelemetry.current,
+        power: this.currentTelemetry.power,
+        speed: this.currentTelemetry.speed,
+        rpm: this.currentTelemetry.rpm,
+        latitude: this.currentTelemetry.latitude,
+        longitude: this.currentTelemetry.longitude,
+        efficiency: this.currentTelemetry.efficiency,
+        consumption: this.currentTelemetry.consumption,
+        totalEnergy: this.currentTelemetry.totalEnergy
+      });
+
       // Store data for graphs
       this.storeTelemetryForGraphs();
+      
+      // Echo the packet back to the same topic for logging, marked with source
+      this.publishTelemetryEcho({
+        voltage: this.currentTelemetry.voltage,
+        current: this.currentTelemetry.current,
+        power: this.currentTelemetry.power,
+        speed: this.currentTelemetry.speed,
+        rpm: this.currentTelemetry.rpm,
+        latitude: this.currentTelemetry.latitude,
+        longitude: this.currentTelemetry.longitude,
+        efficiency: this.currentTelemetry.efficiency,
+        consumption: this.currentTelemetry.consumption,
+        totalEnergy: this.currentTelemetry.totalEnergy,
+        original: data,
+        timestamp: Date.now()
+      });
       
     } catch (error) {
       console.error('❌ Error parsing MQTT message:', error);
     }
   }
 
+  publishTelemetryEcho(payload) {
+    try {
+      if (!this.mqttClient || !this.isConnected) return;
+      const out = {
+        ...payload,
+        source: 'dashboard'
+      };
+      this.mqttClient.publish(
+        this.mqttConfig.topics.telemetry,
+        JSON.stringify(out),
+        { qos: 0, retain: false }
+      );
+    } catch (_) {}
+  }
+
+  logTelemetryPacket(payload) {
+    try {
+      // Use fetch with keepalive for reliability; falls back gracefully if server not running
+      fetch('/log_telemetry', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        keepalive: true
+      }).catch(() => {});
+    } catch (e) {
+      // Ignore logging errors to avoid impacting UI
+    }
+  }
+
   calculateTelemetryMetrics() {
-    // Calculate efficiency: km/kWh (simplified calculation)
-    if (this.currentTelemetry.power > 0 && this.currentTelemetry.speed > 0) {
-      // Efficiency = speed / (power / 1000) * 3600 / 1000 = speed * 3.6 / (power / 1000)
-      this.currentTelemetry.efficiency = (this.currentTelemetry.speed * 3.6) / (this.currentTelemetry.power / 1000);
-    } else {
-      this.currentTelemetry.efficiency = 0;
-    }
-    
-    // Calculate consumption: Wh/km
-    if (this.currentTelemetry.speed > 0) {
-      this.currentTelemetry.consumption = this.currentTelemetry.power / this.currentTelemetry.speed;
-    } else {
-      this.currentTelemetry.consumption = 0;
-    }
-    
-    // Update total energy (cumulative)
+    // Update total energy (cumulative) - calculate energy used in real-time
     if (!this.energyStartTime) {
       this.energyStartTime = Date.now();
     }
@@ -789,10 +858,27 @@ class RacingTelemetryDashboard {
     // Reset energy start time for next calculation
     this.energyStartTime = Date.now();
     
+    // Calculate efficiency: km/kWh
+    if (this.currentTelemetry.totalEnergy > 0 && this.currentTelemetry.distance > 0) {
+      const energyKWh = this.currentTelemetry.totalEnergy / 1000; // Convert Wh to kWh
+      this.currentTelemetry.efficiency = this.currentTelemetry.distance / energyKWh; // km/kWh
+    } else {
+      this.currentTelemetry.efficiency = 0;
+    }
+    
+    // Calculate consumption: Wh/km = totalEnergy (Wh) / distance (km)
+    const displayDistance = Math.max(0, this.currentTelemetry.distance - this.distanceOffset);
+    if (displayDistance > 0) {
+      this.currentTelemetry.consumption = this.currentTelemetry.totalEnergy / displayDistance; // Wh/km
+    } else {
+      this.currentTelemetry.consumption = 0;
+    }
+    
     console.log('📊 Calculated metrics:', {
       efficiency: this.currentTelemetry.efficiency,
       consumption: this.currentTelemetry.consumption,
-      totalEnergy: this.currentTelemetry.totalEnergy
+      totalEnergy: this.currentTelemetry.totalEnergy,
+      distance: displayDistance
     });
   }
 
@@ -1079,28 +1165,58 @@ class RacingTelemetryDashboard {
   }
 
   updateTelemetryFromMqtt() {
+    // Calculate rolling average speed
+    this.speedHistory.push(this.currentTelemetry.speed);
+    if (this.speedHistory.length > 100) {
+      this.speedHistory.shift();
+    }
+    const avgSpeed = this.speedHistory.length > 0 
+      ? this.speedHistory.reduce((sum, speed) => sum + speed, 0) / this.speedHistory.length 
+      : 0;
+    
+    // Calculate display distance (with offset for reset)
+    const displayDistance = Math.max(0, this.currentTelemetry.distance - this.distanceOffset);
+    
     // Update all dashboard elements with current telemetry data
-    this.updateElement('mainSpeed', this.currentTelemetry.speed.toFixed(1));
-    this.updateElement('avgSpeed', this.currentTelemetry.speed > 0 ? this.currentTelemetry.speed.toFixed(1) : '-');
-    this.updateElement('voltage', this.currentTelemetry.voltage > 0 ? this.currentTelemetry.voltage.toFixed(1) : '-');
+    this.updateElement('mainSpeed', this.currentTelemetry.speed > 0 ? this.currentTelemetry.speed.toFixed(1) : '0');
+    this.updateElement('avgSpeed', avgSpeed > 0 ? avgSpeed.toFixed(1) : '0');
+    this.updateElement('voltage', this.currentTelemetry.voltage > 0 ? this.currentTelemetry.voltage.toFixed(1) : '0');
     this.updateElement('current', this.currentTelemetry.current.toFixed(1));
-    this.updateElement('power', this.currentTelemetry.power > 0 ? this.currentTelemetry.power.toFixed(0) : '-');
-    this.updateElement('totalEnergy', this.currentTelemetry.rpm.toFixed(0));
-    this.updateElement('consumption', this.currentTelemetry.consumption > 0 ? this.currentTelemetry.consumption.toFixed(0) : '-');
-    this.updateElement('efficiency', this.currentTelemetry.efficiency > 0 ? this.currentTelemetry.efficiency.toFixed(1) : '-');
-    this.updateElement('gpsLongitude', this.currentTelemetry.longitude !== 0 ? this.currentTelemetry.longitude.toFixed(6) : '-');
-    this.updateElement('gpsLatitude', this.currentTelemetry.latitude !== 0 ? this.currentTelemetry.latitude.toFixed(6) : '-');
+    this.updateElement('power', this.currentTelemetry.power > 0 ? this.currentTelemetry.power.toFixed(0) : '0');
+    this.updateElement('totalEnergy', this.currentTelemetry.rpm > 0 ? this.currentTelemetry.rpm.toFixed(0) : '0');
+    this.updateElement('distanceCovered', displayDistance.toFixed(3));
+    this.updateElement('consumption', this.currentTelemetry.consumption > 0 ? this.currentTelemetry.consumption.toFixed(1) : '0');
+    this.updateElement('efficiency', this.currentTelemetry.efficiency > 0 ? this.currentTelemetry.efficiency.toFixed(1) : '0');
+    this.updateElement('gpsLongitude', this.currentTelemetry.longitude !== 0 ? this.currentTelemetry.longitude.toFixed(6) : '0.000000');
+    this.updateElement('gpsLatitude', this.currentTelemetry.latitude !== 0 ? this.currentTelemetry.latitude.toFixed(6) : '0.000000');
     
     // Update main efficiency display
     this.updateElement('mainEfficiency', this.currentTelemetry.efficiency > 0 ? this.currentTelemetry.efficiency.toFixed(1) : '0');
     
     console.log('📊 Updated dashboard with Arduino data:', {
       speed: this.currentTelemetry.speed,
+      avgSpeed: avgSpeed,
+      rpm: this.currentTelemetry.rpm,
+      distance: displayDistance,
       voltage: this.currentTelemetry.voltage,
       current: this.currentTelemetry.current,
       power: this.currentTelemetry.power,
-      efficiency: this.currentTelemetry.efficiency
+      efficiency: this.currentTelemetry.efficiency,
+      consumption: this.currentTelemetry.consumption,
+      latitude: this.currentTelemetry.latitude,
+      longitude: this.currentTelemetry.longitude
     });
+  }
+  
+  resetDistance() {
+    // Set offset to current distance to reset display to 0
+    this.distanceOffset = this.currentTelemetry.distance;
+    // Also reset total energy to recalculate consumption from zero
+    this.currentTelemetry.totalEnergy = 0;
+    this.energyStartTime = Date.now();
+    console.log('🔄 Distance reset to 0');
+    // Update display immediately
+    this.updateTelemetryFromMqtt();
   }
 
   hideTrackOverlay() {

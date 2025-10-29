@@ -44,6 +44,12 @@ body {
     gap: 20px;
 }
 
+.header-buttons {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
 .test-btn {
     background: linear-gradient(135deg, #ff6b35, #ff8c42);
     color: white;
@@ -63,6 +69,27 @@ body {
     background: linear-gradient(135deg, #ff8c42, #ff6b35);
     transform: translateY(-1px);
     box-shadow: 0 4px 12px rgba(255, 107, 53, 0.3);
+}
+
+.reset-btn {
+    background: linear-gradient(135deg, #00ccff, #0066ff);
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 6px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    position: relative;
+    z-index: 100;
+    pointer-events: auto;
+}
+
+.reset-btn:hover {
+    background: linear-gradient(135deg, #0066ff, #00ccff);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0, 204, 255, 0.3);
 }
 
 .logo {

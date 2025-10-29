@@ -22,7 +22,10 @@
                     <span class="lap-text">LAP</span>
                     <span class="lap-number" id="lapCounter">0/4</span>
                 </div>
-                <button id="testMqttBtn" class="test-btn">Test MQTT</button>
+                <div class="header-buttons">
+                    <button id="testMqttBtn" class="test-btn">Test MQTT</button>
+                    <button id="resetDistanceBtn" class="reset-btn" title="Reset distance to 0">Reset Distance</button>
+                </div>
             </div>
         </header>
 
@@ -92,7 +95,7 @@
                             <div class="metric-item">
                                 <div class="metric-value" id="consumption">0</div>
                                 <div class="metric-unit">Wh/km</div>
-                                <div class="metric-label">Consumption</div>
+                                <div class="metric-label">Energy (Wh/km)</div>
                             </div>
                             <div class="metric-item">
                                 <div class="metric-value" id="voltage">0</div>
