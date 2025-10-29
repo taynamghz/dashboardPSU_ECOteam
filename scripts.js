@@ -746,6 +746,7 @@ class RacingTelemetryDashboard {
       
       if (data.rpm !== undefined) {
         this.currentTelemetry.rpm = parseFloat(data.rpm) || 0;
+        console.log('🔧 Parsed RPM from broker:', data.rpm, '→', this.currentTelemetry.rpm);
       }
       
       if (data.speed !== undefined) {
@@ -755,6 +756,7 @@ class RacingTelemetryDashboard {
       // Parse distance_km from payload
       if (data.distance_km !== undefined) {
         this.currentTelemetry.distance = parseFloat(data.distance_km) || 0;
+        console.log('📏 Parsed distance_km from broker:', data.distance_km, '→', this.currentTelemetry.distance);
       }
       
       // Parse GPS coordinates from payload (support multiple key variants)
@@ -1178,15 +1180,17 @@ class RacingTelemetryDashboard {
     const displayDistance = Math.max(0, this.currentTelemetry.distance - this.distanceOffset);
     
     // Update all dashboard elements with current telemetry data
-    this.updateElement('mainSpeed', this.currentTelemetry.speed > 0 ? this.currentTelemetry.speed.toFixed(1) : '0');
-    this.updateElement('avgSpeed', avgSpeed > 0 ? avgSpeed.toFixed(1) : '0');
-    this.updateElement('voltage', this.currentTelemetry.voltage > 0 ? this.currentTelemetry.voltage.toFixed(1) : '0');
-    this.updateElement('current', this.currentTelemetry.current.toFixed(1));
-    this.updateElement('power', this.currentTelemetry.power > 0 ? this.currentTelemetry.power.toFixed(0) : '0');
-    this.updateElement('totalEnergy', this.currentTelemetry.rpm > 0 ? this.currentTelemetry.rpm.toFixed(0) : '0');
-    this.updateElement('distanceCovered', displayDistance.toFixed(3));
-    this.updateElement('consumption', this.currentTelemetry.consumption > 0 ? this.currentTelemetry.consumption.toFixed(1) : '0');
-    this.updateElement('efficiency', this.currentTelemetry.efficiency > 0 ? this.currentTelemetry.efficiency.toFixed(1) : '0');
+    this.updateElement('mainSpeed', this.currentTelemetry.speed >= 0 ? this.currentTelemetry.speed.toFixed(1) : '0');
+    this.updateElement('avgSpeed', avgSpeed >= 0 ? avgSpeed.toFixed(1) : '0');
+    this.updateElement('voltage', this.currentTelemetry.voltage >= 0 ? this.currentTelemetry.voltage.toFixed(1) : '0');
+    this.updateElement('current', this.currentTelemetry.current >= 0 ? this.currentTelemetry.current.toFixed(1) : '0');
+    this.updateElement('power', this.currentTelemetry.power >= 0 ? this.currentTelemetry.power.toFixed(0) : '0');
+    // Update RPM - always show current value
+    this.updateElement('totalEnergy', (this.currentTelemetry.rpm !== undefined && this.currentTelemetry.rpm !== null) ? this.currentTelemetry.rpm.toFixed(0) : '0');
+    // Update distance - always show current value
+    this.updateElement('distanceCovered', (displayDistance >= 0) ? displayDistance.toFixed(3) : '0.000');
+    this.updateElement('consumption', this.currentTelemetry.consumption >= 0 ? this.currentTelemetry.consumption.toFixed(1) : '0');
+    this.updateElement('efficiency', this.currentTelemetry.efficiency >= 0 ? this.currentTelemetry.efficiency.toFixed(1) : '0');
     this.updateElement('gpsLongitude', this.currentTelemetry.longitude !== 0 ? this.currentTelemetry.longitude.toFixed(6) : '0.000000');
     this.updateElement('gpsLatitude', this.currentTelemetry.latitude !== 0 ? this.currentTelemetry.latitude.toFixed(6) : '0.000000');
     
