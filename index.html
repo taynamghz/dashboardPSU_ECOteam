@@ -26,8 +26,22 @@
             </div>
         </header>
 
+        <!-- View Toggle Switch -->
+        <div class="view-toggle-section">
+            <div class="toggle-container">
+                <button id="liveTelemetryBtn" class="toggle-btn active" data-view="telemetry">
+                    <span class="toggle-icon">📊</span>
+                    <span class="toggle-text">Live Telemetry</span>
+                </button>
+                <button id="graphsBtn" class="toggle-btn" data-view="graphs">
+                    <span class="toggle-icon">📈</span>
+                    <span class="toggle-text">Analytics Graphs</span>
+                </button>
+            </div>
+        </div>
+
         <!-- Main Data Display -->
-        <div class="main-data-section">
+        <div class="main-data-section" id="mainDataSection">
             <div class="main-data-item efficiency-section">
                 <div class="main-data-value" id="mainEfficiency">0</div>
                 <div class="main-data-label">Efficiency</div>
@@ -45,7 +59,8 @@
             </div>
         </div>
 
-        <div class="dashboard-layout">
+        <!-- Live Telemetry View -->
+        <div class="dashboard-layout" id="telemetryView">
             <!-- Left Side - Combined Telemetry Card -->
             <div class="telemetry-section">
                 <!-- Combined Race Telemetry & Electrical Card -->
@@ -143,8 +158,8 @@
             </div>
         </div>
 
-        <!-- F1-Style Telemetry Graphs -->
-        <div class="graphs-section">
+        <!-- Analytics Graphs View -->
+        <div class="graphs-section" id="graphsView" style="display: none;">
             <div class="graphs-header">
                 <h2>Telemetry Analysis</h2>
                 <div class="graph-controls">

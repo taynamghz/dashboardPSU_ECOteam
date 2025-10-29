@@ -287,6 +287,101 @@ class TrackVisualizer2D {
   }
 }
 
+// View Toggle Controller
+class ViewToggleController {
+  constructor() {
+    this.currentView = 'telemetry';
+    this.telemetryView = document.getElementById('telemetryView');
+    this.graphsView = document.getElementById('graphsView');
+    this.mainDataSection = document.getElementById('mainDataSection');
+    this.liveTelemetryBtn = document.getElementById('liveTelemetryBtn');
+    this.graphsBtn = document.getElementById('graphsBtn');
+    
+    this.setupEventListeners();
+    this.showView('telemetry'); // Default to telemetry view
+  }
+
+  setupEventListeners() {
+    if (this.liveTelemetryBtn) {
+      this.liveTelemetryBtn.addEventListener('click', () => {
+        this.showView('telemetry');
+      });
+    }
+
+    if (this.graphsBtn) {
+      this.graphsBtn.addEventListener('click', () => {
+        this.showView('graphs');
+      });
+    }
+  }
+
+  showView(viewType) {
+    console.log(`🔄 Switching to ${viewType} view`);
+    
+    // Update button states
+    if (this.liveTelemetryBtn && this.graphsBtn) {
+      this.liveTelemetryBtn.classList.toggle('active', viewType === 'telemetry');
+      this.graphsBtn.classList.toggle('active', viewType === 'graphs');
+    }
+
+    // Show/hide sections with smooth transitions
+    if (viewType === 'telemetry') {
+      if (this.telemetryView) {
+        this.telemetryView.style.display = 'flex';
+        this.telemetryView.style.opacity = '0';
+        setTimeout(() => {
+          this.telemetryView.style.opacity = '1';
+          // Resize track canvas when showing telemetry view
+          if (window.trackVisualizer) {
+            window.trackVisualizer.resizeCanvas();
+            // Redraw the track if data is available
+            if (window.racingDashboard && window.racingDashboard.csvData) {
+              window.trackVisualizer.setTrackData(window.racingDashboard.csvData);
+            }
+          }
+        }, 10);
+      }
+      
+      if (this.graphsView) {
+        this.graphsView.style.display = 'none';
+      }
+      
+      if (this.mainDataSection) {
+        this.mainDataSection.style.display = 'flex';
+      }
+    } else if (viewType === 'graphs') {
+      if (this.telemetryView) {
+        this.telemetryView.style.display = 'none';
+      }
+      
+      if (this.graphsView) {
+        this.graphsView.style.display = 'block';
+        this.graphsView.style.opacity = '0';
+        setTimeout(() => {
+          this.graphsView.style.opacity = '1';
+          // Resize graphs when showing graphs view
+          if (window.f1Graphs) {
+            window.f1Graphs.refreshGraphs();
+            setTimeout(() => {
+              window.f1Graphs.resizeGraphs();
+            }, 200);
+          }
+        }, 10);
+      }
+      
+      if (this.mainDataSection) {
+        this.mainDataSection.style.display = 'none';
+      }
+    }
+
+    this.currentView = viewType;
+  }
+
+  getCurrentView() {
+    return this.currentView;
+  }
+}
+
 // Initialize 2D Track Visualizer when DOM is ready
 document.addEventListener('DOMContentLoaded', () => {
   console.log(' DOM loaded, initializing 2D Track Visualizer...');
@@ -301,6 +396,11 @@ document.addEventListener('DOMContentLoaded', () => {
     console.log(' Initializing F1-Style Graphs...');
     window.f1Graphs = new F1TelemetryGraphs();
     console.log(' F1-Style Graphs initialized');
+    
+    // Initialize View Toggle Controller
+    console.log(' Initializing View Toggle Controller...');
+    window.viewToggle = new ViewToggleController();
+    console.log(' View Toggle Controller initialized');
     
     // Initialize dashboard after track visualizer is ready
     console.log('🚀 Initializing Racing Telemetry Dashboard...');
@@ -633,10 +733,16 @@ class RacingTelemetryDashboard {
         this.currentTelemetry.speed = parseFloat(data.speed) || 0;
       }
       
-      // Parse GPS coordinates from Arduino payload
-      if (data.lat !== undefined && data.lon !== undefined) {
+      // Parse GPS coordinates from payload (support multiple key variants)
+      if (data.lat !== undefined && (data.lon !== undefined || data.lng !== undefined)) {
         this.currentTelemetry.latitude = parseFloat(data.lat) || 0;
-        this.currentTelemetry.longitude = parseFloat(data.lon) || 0;
+        this.currentTelemetry.longitude = parseFloat(data.lon ?? data.lng) || 0;
+      } else if (data.latitude !== undefined && data.longitude !== undefined) {
+        this.currentTelemetry.latitude = parseFloat(data.latitude) || 0;
+        this.currentTelemetry.longitude = parseFloat(data.longitude) || 0;
+      } else if (data.gps_latitude !== undefined && data.gps_longitude !== undefined) {
+        this.currentTelemetry.latitude = parseFloat(data.gps_latitude) || 0;
+        this.currentTelemetry.longitude = parseFloat(data.gps_longitude) || 0;
       }
       
       // Calculate additional metrics for dashboard
@@ -645,8 +751,8 @@ class RacingTelemetryDashboard {
       // Update dashboard with new data
       this.updateTelemetryFromMqtt();
       
-      // Update track visualizer with GPS position
-      this.updateTrackPosition();
+      // Update only the displayed GPS values in real time (no pointer move)
+      this.updateGPSDisplay(this.currentTelemetry.latitude, this.currentTelemetry.longitude);
       
       // Store data for graphs
       this.storeTelemetryForGraphs();
@@ -2337,6 +2443,18 @@ class F1TelemetryGraphs {
     if (window.racingDashboard && window.racingDashboard.csvData) {
       this.setData(window.racingDashboard.csvData);
     }
+  }
+
+  resizeGraphs() {
+    // Resize all Plotly graphs when view changes
+    const graphIds = ['currentHeatMap', 'energyHeatMap', 'speedGraph', 'currentGraph', 'powerGraph', 'accelerationGraph'];
+    
+    graphIds.forEach(graphId => {
+      const element = document.getElementById(graphId);
+      if (element && Plotly) {
+        Plotly.Plots.resize(element);
+      }
+    });
   }
 
   filterDataByLap(data) {
