@@ -25,6 +25,11 @@
                 <div class="header-buttons">
                     <button id="testMqttBtn" class="test-btn">Test MQTT</button>
                     <button id="resetDistanceBtn" class="reset-btn" title="Reset distance to 0">Reset Distance</button>
+                    <div class="header-buttons">
+                        <button id="startLogBtn" class="log-btn">Start Logging</button>
+                        <button id="stopLogBtn" class="log-btn" disabled>Stop & Download</button>
+                      </div>
+                      
                 </div>
             </div>
         </header>
@@ -73,7 +78,7 @@
                     </div>
                     <div class="card-content">
                         <!-- Row 1: Avg Speed, Remaining Time, Distance -->
-                        <div class="metric-row">
+                     o   <div class="metric-row">
                             <div class="metric-item">
                                 <div class="metric-value" id="avgSpeed">0</div>
                                 <div class="metric-unit">km/h</div>
@@ -117,6 +122,11 @@
                             </div>
                             <div class="metric-item">
                                 <div class="metric-value" id="totalEnergy">0</div>
+                                <div class="metric-unit">Wh</div>
+                                <div class="metric-label">Total Energy</div>
+                            </div>
+                            <div class="metric-item">
+                                <div class="metric-value" id="rpm">0</div>
                                 <div class="metric-unit">RPM</div>
                                 <div class="metric-label">RPM</div>
                             </div>
