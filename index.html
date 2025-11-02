@@ -4,6 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>JM Racing Dashboard</title>
+    <!-- Leaflet CSS & JS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
     <link rel="stylesheet" href="style.css">
     <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
     <script src="https://unpkg.com/mqtt@5.0.0/dist/mqtt.min.js"></script>
@@ -157,7 +161,7 @@
             <div class="location-section">
                 <div class="location-card">
                     <div class="map-container">
-                        <canvas id="trackCanvas" class="track-canvas"></canvas>
+                        <div id="map" class="track-map"></div>
                         
                         <!-- Overlay Controls -->
                         <div class="track-overlay" id="trackOverlay">
@@ -222,6 +226,11 @@
                     <div class="graph-title">Acceleration vs Speed</div>
                     <div id="accelerationGraph" class="plotly-graph"></div>
                 </div>
+                <div id="trackGraph" class="plotly-graph"></div>
+<div id="currentDistGraph" class="plotly-graph"></div>
+<div id="speedDistGraph" class="plotly-graph"></div>
+<div id="accelSpeedGraph" class="plotly-graph"></div>
+
             </div>
         </div>
 

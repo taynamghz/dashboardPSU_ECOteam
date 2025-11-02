@@ -78,6 +78,31 @@ const state = {
 function clampLen(arr, max) {
   if (arr.length > max) arr.splice(0, arr.length - max);
 }
+/* ====== MAP SETUP (Leaflet) ====== */
+let map, marker;
+
+function initMap() {
+  // Start with a neutral location (will be updated by telemetry)
+  const startPos = [0, 0];
+
+  map = L.map('map').setView(startPos, 2); // zoomed out initially
+
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; OpenStreetMap contributors'
+  }).addTo(map);
+
+  marker = L.marker(startPos).addTo(map);
+  if (navigator.geolocation) {
+    navigator.geolocation.getCurrentPosition(pos => {
+      const coords = [pos.coords.latitude, pos.coords.longitude];
+      map.setView(coords, 16);
+      marker.setLatLng(coords);
+    });
+  }
+  
+}
+
 
 /* ====== MQTT ====== */
 let client;
@@ -220,7 +245,12 @@ function paint(){
 
   // Laps
   lapCounterEl.textContent = `${Math.min(state.laps, LAPS_TARGET)}/${LAPS_TARGET}`;
-
+  if (map && marker && state.lat && state.lon) {
+    const pos = [state.lat, state.lon];
+    marker.setLatLng(pos);  // Move marker to new location
+    map.panTo(pos, { animate: true, duration: 0.5 });
+  }
+  
   // Graph update
   updateGraphs();
 }
@@ -243,36 +273,91 @@ function remainingTime(){
 
 /* ====== GRAPHS ====== */
 let graphsInited = false;
+let lastGraphMs = 0;
+
+// get references to all graph divs
+const trackGraphDiv      = document.getElementById("trackGraph");
+const currentDistGraphDiv= document.getElementById("currentDistGraph");
+const speedDistGraphDiv  = document.getElementById("speedDistGraph");
+const accelSpeedGraphDiv = document.getElementById("accelSpeedGraph");
+
 function ensureGraphs(){
   if (graphsInited) return;
   graphsInited = true;
 
+  const baseLayout = {
+    margin: { t: 30 },
+    autosize: true,
+    paper_bgcolor: "transparent",
+    plot_bgcolor: "transparent",
+    showlegend: false
+  };
+
   Plotly.newPlot(speedGraphDiv, [{
     x: [], y: [], name: "Speed (km/h)", mode: "lines"
-  }], {title: "Speed vs Time", xaxis:{title:"s"}, yaxis:{title:"km/h"}}, {responsive:true});
+  }], { ...baseLayout, title: "Speed vs Time", xaxis:{title:"Time (s)"}, yaxis:{title:"km/h"} }, {responsive:true});
 
   Plotly.newPlot(currentGraphDiv, [{
     x: [], y: [], name: "Current (A)", mode: "lines"
-  }], {title: "Current vs Time", xaxis:{title:"s"}, yaxis:{title:"A"}}, {responsive:true});
+  }], { ...baseLayout, title: "Current vs Time", xaxis:{title:"Time (s)"}, yaxis:{title:"A"} }, {responsive:true});
 
   Plotly.newPlot(powerGraphDiv, [{
     x: [], y: [], name: "Power (W)", mode: "lines"
-  }], {title: "Power vs Time", xaxis:{title:"s"}, yaxis:{title:"W"}}, {responsive:true});
+  }], { ...baseLayout, title: "Power vs Time", xaxis:{title:"Time (s)"}, yaxis:{title:"W"} }, {responsive:true});
+
+  Plotly.newPlot(trackGraphDiv, [{
+    x: [], y: [], mode: "lines", line:{width:3}, name:"GPS Path"
+  }], { ...baseLayout, title:"Track Visualization (Current Heatmap)", xaxis:{title:"Longitude"}, yaxis:{title:"Latitude"} }, {responsive:true});
+
+  Plotly.newPlot(currentDistGraphDiv, [{
+    x: [], y: [], mode: "lines", name: "Current (A)", line:{width:2}
+  }], { ...baseLayout, title:"Current vs Distance", xaxis:{title:"Distance (km)"}, yaxis:{title:"Current (A)"} }, {responsive:true});
+
+  Plotly.newPlot(speedDistGraphDiv, [{
+    x: [], y: [], mode: "lines", name: "Speed (km/h)", line:{width:2}
+  }], { ...baseLayout, title:"Speed vs Distance", xaxis:{title:"Distance (km)"}, yaxis:{title:"Speed (km/h)"} }, {responsive:true});
+
+  Plotly.newPlot(accelSpeedGraphDiv, [{
+    x: [], y: [], mode: "markers",
+    marker:{size:6, color:[], colorscale:"Turbo", colorbar:{title:"Consumption"}}
+  }], { ...baseLayout, title:"Acceleration vs Speed", xaxis:{title:"Acceleration (m/s²)"}, yaxis:{title:"Speed (km/h)"} }, {responsive:true});
 }
 
-let lastGraphMs = 0;
 function updateGraphs(){
   if (graphsView.style.display === "none") return;
   ensureGraphs();
   const now = performance.now();
-  if (now - lastGraphMs < 300) return;
+  if (now - lastGraphMs < 500) return;
   lastGraphMs = now;
 
   const {t, speed, current, power} = state.series;
-  Plotly.update(speedGraphDiv,   {x:[t], y:[speed]});
-  Plotly.update(currentGraphDiv, {x:[t], y:[current]});
-  Plotly.update(powerGraphDiv,   {x:[t], y:[power]});
+  const latest = t.length - 1;
+  if (latest < 0) return;
+
+  // compute derived quantities
+  const dist = Math.max(0, state.distKmAbs - state.baseDistKm);
+  const prevIndex = Math.max(0, latest - 1);
+  const dt = t[latest] - t[prevIndex];
+  const dv = speed[latest] - speed[prevIndex];
+  const dE = state.energyWhAbs - state.baseEnergyWh;
+  state.acceleration = dt > 0 ? (dv / dt) : 0;
+  state.consumption  = dist > 0 ? (dE / dist) : 0;
+
+  // extend base graphs
+  Plotly.extendTraces(speedGraphDiv,   {x:[[t[latest]]], y:[[speed[latest]]]}, [0], 3000);
+  Plotly.extendTraces(currentGraphDiv, {x:[[t[latest]]], y:[[current[latest]]]}, [0], 3000);
+  Plotly.extendTraces(powerGraphDiv,   {x:[[t[latest]]], y:[[power[latest]]]}, [0], 3000);
+
+  // analytics graphs
+  Plotly.extendTraces(currentDistGraphDiv, {x:[[dist]], y:[[state.i]]}, [0], 3000);
+  Plotly.extendTraces(speedDistGraphDiv,   {x:[[dist]], y:[[state.speed]]}, [0], 3000);
+  Plotly.extendTraces(trackGraphDiv, {x:[[state.lon]], y:[[state.lat]]}, [0], 3000);
+  Plotly.restyle(trackGraphDiv, {"line.color": [[`rgb(${Math.min(255, state.i*5)},0,200)`]]}, [0]);
+  Plotly.extendTraces(accelSpeedGraphDiv,
+    {x:[[state.acceleration]], y:[[state.speed]], "marker.color":[[state.consumption]]},
+    [0], 1000);
 }
+
 
 /* ====== UI EVENTS ====== */
 liveBtn?.addEventListener("click", () => {
@@ -281,30 +366,34 @@ liveBtn?.addEventListener("click", () => {
   telemView.style.display = "";
   graphsView.style.display = "none";
 });
-graphsBtn?.addEventListener("click", () => {
+
+
+resetDistanceBtn?.addEventListener("click", () => {
+  state.baseDistKm = state.distKmAbs;
+  state.baseEnergyWh = state.energyWhAbs;
+  resetDistanceBtn.textContent = " Reset!";
+  setTimeout(() => resetDistanceBtn.textContent = "Reset Distance", 1500);
+});
+
+testBtn?.addEventListener("click", () => {
+  if (!client) return alert("MQTT client not initialized.");
+  if (client.connected) alert(" MQTT connected to HiveMQ Cloud successfully!");
+  else {
+    alert(" MQTT not connected.\nAttempting to reconnect...");
+    client.reconnect();
+  }
+});
+graphsBtn.addEventListener("click", () => {
   graphsBtn.classList.add("active");
   liveBtn.classList.remove("active");
   telemView.style.display = "none";
   graphsView.style.display = "";
   ensureGraphs();
   requestFrame();
+  // 👇 Important: trigger Plotly to recalc layout after becoming visible
+  setTimeout(() => Plotly.Plots.resize(document.querySelector('#graphsView')), 300);
 });
 
-resetDistanceBtn?.addEventListener("click", () => {
-  state.baseDistKm = state.distKmAbs;
-  state.baseEnergyWh = state.energyWhAbs;
-  resetDistanceBtn.textContent = "✅ Reset!";
-  setTimeout(() => resetDistanceBtn.textContent = "Reset Distance", 1500);
-});
-
-testBtn?.addEventListener("click", () => {
-  if (!client) return alert("MQTT client not initialized.");
-  if (client.connected) alert("✅ MQTT connected to HiveMQ Cloud successfully!");
-  else {
-    alert("❌ MQTT not connected.\nAttempting to reconnect...");
-    client.reconnect();
-  }
-});
 
 /* ====== CSV LOGGING ====== */
 let logging = false;
@@ -355,3 +444,4 @@ function toCSV(dataArray) {
 
 /* ====== BOOT ====== */
 mqttConnect();
+initMap();
